@@ -1,157 +1,226 @@
-# UI 
+# UI
 
-## UI Components:
+## UI Components
 
 ### Event Abstract
 
-事件摘要
-
-展示内容包括:
+事件摘要展示内容包括：
 
 - 事件标题
-- 文本展示前config.abstract_show_content_length个字符
-- 图片展示前config.abstract_show_picture_count个
-- tag的优先级最高的前config.abstract_show_tag_count个
-- comments的前config.abstract_show_comment_count个
+- 文本前 `config.abstract_show_content_length` 个字符
+- 前 `config.abstract_show_picture_count` 张图片
+- 按优先级取前 `config.abstract_show_tag_count` 个 tag
+- 前 `config.abstract_show_comment_count` 条评论
 
-从上到下顺序为标题(同行显示tag),文本,图片(横向排列)
+展示顺序：
 
-对Task额外展示一个"完成"按钮.
+1. 标题与 tag 同行
+2. 文本
+3. 图片横向排列
 
-### Event Flow:
+Task 的卡片规则：
 
-按时间顺序展示Event Abstract,点击某个Event Abstract进入Event Detail界面
+- 仅当前进行中的 Task 展示操作按钮
+- 当前按钮为：`完成`、`放弃`
+- 已完成或已失败的任务回到普通 Event 展示，不再显示操作按钮
 
-界面上应显示为左侧有一个竖直的时间轴线条,右侧展示Event Abstract垂直布局.
+### Event Flow
 
-不分页,无限滚动
-
-组件最上方时筛选器:一个日期控件,以及tags,展示当前显示的tags,当点击tags时会弹出一个TagsWindow
+- 按 `time` 倒序展示 Event Abstract
+- 左侧是一条竖直时间轴，右侧是卡片流
+- 使用无限滚动，但只保留前后若干屏的动态加载内容
+- 顶部筛选器包括：
+  - 日期跳转控件
+  - 关键词搜索
+  - tags 过滤器
+- tag 筛选逻辑取交集
+- 日期控件用于跳转到某个日期附近的内容
 
 ### InputBox
 
-创建一个Event的地方
+用于创建普通 Event：
 
-一个文本框,初始高度不高,但自动把高度变为文字内容+2行
+- 一个自动增高的文本框，初始高度较低，随内容增长
+- 文本框下方是一行工具按钮：
+  - 相机
+  - 图片
+  - 视频
+  - 音频
+  - 标签
+  - 发送
+- 本版移除“链接”按钮
+- 点击标签时打开 `TagsWindow`
+- 上传资源在工具栏下方竖直排列
 
-文本框下方为工具箱:
-- 第一行横排若干个按钮成一行:相机,图片,视频,音频,链接,标签,发送,
-- 点击标签时应该弹出TagsWindow窗口
+滚动规则：
 
-对于上传的资源,竖直排版展示在这排按钮的下面
+- 输入框、工具栏、资源预览共用一个滚动容器
+- 当工具栏将从顶部离开屏幕时吸顶
+- 当工具栏将从底部离开屏幕时吸底
 
-当上传资源过多/文字过多时,滚动条整体滚动三部分,但按钮一行会在到达屏幕顶部后保持在顶部/到达屏幕底部后保持在底部
+### CameraButton
 
-### CameraButon
-
-InputBox的捷径,使用摄像机上传一张图像/视频,其他值全部默认
+- 作为 `InputBox` 的快捷入口
+- 拍摄一张图片或一段视频后，跳转到 New 页面
+- New 页面自动带入刚拍摄的资源
+- 用户确认后再发送，而不是拍完立即入库
 
 ### TagsWindow
 
-type:filter/create
+`type: filter | create`
 
-从上到下包括
-- 已经选择的标签(横向排列,多的时候多行)
-- 左右排列:
-  - 标签分类(nature/mood/others/location)
-    - type为create时location只是一个按钮用于选择是否携带当前位置,不切换选项卡,默认为开启
-  - 某个分类下的所有标签,按上次使用该标签的时间排序(优先展示最近使用的)
-    - type为filter的时候location选项卡里的选法不是标签的集合,而是国家,省份,城市,区的级联选择.默认为当前位置.
+从上到下包括：
+
+- 已选择标签区，横向排列，过多时换行
+- 下方左右两栏：
+  - 左侧为标签分类
+  - 右侧为该分类下的标签列表
+
+标签分类包括：
+
+- nature
+- mood
+- others
+- people
+- location
+
+create 模式：
+
+- location 不切换到单独 tab，而是一个“携带当前位置”开关
+- 默认开启
+
+filter 模式：
+
+- location 使用国家 / 省份 / 城市 / 区 的级联筛选
+- 默认定位到当前位置；如果定位为空，则从空态开始选择
+
+标签列表排序：
+
+- 按最近一次使用时间倒序
 
 ### Detail
 
-一整个页面用于展示一个事件,从上到下包括内容:
+单个事件详情页从上到下包括：
 
-- 事件
-  - 日期 + 标题(同行)
-  - 标签(tag)
-  - 正文(content)
-  - 多媒体资源(assets)
-- 评论
-  - 按日期排序,一个切换从新到旧/从旧到新的按钮
+- 事件区
+  - 日期 + 标题
+  - 标签
+  - 正文
+  - 多媒体资源
+- 评论区
+  - 评论默认按时间从新到旧
+  - 提供“新到旧 / 旧到新”切换
+  - 记住用户上一次排序选择
 
-### Dairy
+### Diary
 
-一个类似书的视图,手机上为单栏,电脑为双栏
+- 这是一个“书页式”视图
+- Demo 版仅考虑手机单栏布局
+- 每个有 Event 的自然日生成若干页，再按时间顺序串成一本 Diary
 
-每一个有Event的Day生成若干页,再把所有页按顺序放到一起形成一本书.
+单日内容顺序：
 
-对于一天,先有一个标题+日期,然后是依次排列每件事(标题+tags+raw+assets+comments),最后是这一天的summary
+1. 日期标题
+2. 当天所有事件（标题 + tags + raw + assets + comments）
+3. 当天 summary
+
+分页规则：
+
+- 从上往下排版
+- 若当前元素加入后高度超过“屏幕高度 - 2 × config.page_margin”，则分页
+- 确定一页内容后，再重排该页，使空白更平均
+- Demo 版 Diary 导出格式为 HTML
 
 ### Summary
 
-每间隔若干时间生成一个 Summary.间隔时间为config.summary_intervals{}中的某一项就生成一次总结.每一项为一个字符串,单位包括("d","m","y")
-
-确定了Summary内容后,根据一个模板生成一个html字符串.
-
-每个总结是一个Mail,content为html字符串
+- Summary 在自然日结束时检查生成
+- 支持的周期为：`7d`、`3m`、`1y`
+- 生成内容后，套入 HTML 模板
+- 模板中包含：
+  - 任务完成概览
+  - 心情概览
+  - AI 寄语
+  - 用 `js + canvas` 绘制的心情图
+- 每个 Summary 最终都作为一封 Mail 展示
 
 ## UI
 
-上面一行工具栏,下方一行页面切换选项卡(导航栏),中间是不同的切换的Pages
+- 顶部是一行工具栏
+- 底部是一行导航栏
+- 中间是切换页面区域
 
-### 导航栏:
+### 导航栏
 
-#### New(2)
+#### New
 
-#### Event Flow(3)
+#### Event Flow
 
-#### Tasks(1)
+#### Tasks
 
-#### My(4)
+#### My
 
 ### Pages
 
 #### Event Flow
 
-放一个Event Flow
+- 放一个 Event Flow
 
 #### New
 
-一个 InputBox
+- 放一个 InputBox
 
 #### My
 
-一个可点击的列表:
-- Mailbox
-- Dairy Page
-- Setting
-- Data
+- 可点击列表：
+  - Mailbox
+  - Diary Page
+  - Setting
+  - Data
 
 #### Tasks
 
-一个Event Flow,但不显示筛选工具,但强制只显示所有task
-
-页面下方一个文本框和一个发送按钮
+- 基于 Event Flow，但不显示顶部筛选工具
+- 只展示带有 `task + ongoing` tag 的任务
+- 页面底部放一个文本框和一个发送按钮
+- 文本框规则：
+  - 第一行作为 `title`
+  - 第二行及以后作为 `raw`
+- 点击发送后：
+  - 创建新 Task
+  - 清空输入框
+  - 新 Task 立即出现在任务流中
 
 #### Mailbox
 
-一个Mail的列表,点击后通过Mail Page显示某个Mail
+- 展示 Mail 列表
+- 点击后进入 Mail Page
 
 #### Mail Page
 
-顶上一个标题栏显示Mail的标题,然后一行是时间+sender,剩余内容一个巨大的webview
+- 顶部标题栏显示 Mail 标题
+- 下一行显示时间 + sender
+- 剩余区域使用 WebView 展示 HTML 内容
+- WebView 允许执行模板内脚本
 
-#### Dairy Page
+#### Diary Page
 
-展示Dairy
+- 展示 Diary
 
 #### Data
 
-几个按钮选项:
+按钮列表：
 
-Export Json
-Import Json
-Export Dairy
-Export Mails
+- Export Json
+- Import Json
+- Export Diary
+- Export Mails
 
-Push
-Pull
+Demo 版说明：
+
+- `Push` / `Pull` 暂不展示，避免出现空功能按钮
 
 #### Setting
 
-models:一个列表,每项有四个属性:一个baseurl,一个apikey,一个name,一个id
-
-friends:一个列表,每项有Def中的那四个文本属性
-
-token: 一个字符串
+- `models`：列表；每项包含 `base_url`、`api_key`、`name`、`id`
+- `friends`：列表；允许编辑全部字段
+- `token`：保留给未来同步能力，先放在调试区即可
