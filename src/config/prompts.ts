@@ -222,8 +222,9 @@ export function buildSummaryPrompt(input: SummaryPromptInput): PromptBundle {
     ].join('\n'),
     user: [
       '输出 JSON 结构：',
-      '{"task_summary":"string","mood_summary":"string","overall_summary":"string"}',
+      '{"title":"string","task_summary":"string","mood_summary":"string","overall_summary":"string"}',
       '要求：',
+      '- title 用中文，8 到 18 个字，像一封记录的题目，不要包含日期、周期、summary 等字样。',
       '- task_summary 聚焦任务推进与完成率。',
       '- mood_summary 聚焦情绪走势与节奏。',
       '- overall_summary 是总体寄语，不要重复前两段。',

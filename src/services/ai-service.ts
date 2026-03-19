@@ -33,6 +33,7 @@ export interface FriendCommentResult {
 }
 
 export interface SummaryGenerationResult {
+  title: string;
   task_summary: string;
   mood_summary: string;
   overall_summary: string;
@@ -384,6 +385,7 @@ class AiService {
         const record = asRecord(value);
 
         return {
+          title: asString(record.title, 'title'),
           task_summary: asString(record.task_summary, 'task_summary'),
           mood_summary: asString(record.mood_summary, 'mood_summary'),
           overall_summary: asString(record.overall_summary, 'overall_summary'),

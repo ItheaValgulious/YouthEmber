@@ -807,10 +807,12 @@ async function buildSummary(interval: SummaryInterval, rangeEnd: string, force: 
     },
   });
 
+  const dateLabel = toDateKey(endDate);
+  const title = `${summaryCopy.title} · ${dateLabel}`;
   const mail: MailRecord = {
-    id: existingIndex >= 0 ? state.mails[existingIndex].id : randomId('mail'),
+    id: randomId('mail'),
     time: new Date().toISOString(),
-    title: SUMMARY_LABELS[interval],
+    title,
     sender: 'AshDiary AI',
     content: buildSummaryMailHtml({
       interval,
@@ -829,7 +831,7 @@ async function buildSummary(interval: SummaryInterval, rangeEnd: string, force: 
     },
   };
 
-  if (existingIndex >= 0) {
+  if (existingIndex >= 0 && !force) {
     state.mails.splice(existingIndex, 1, mail);
   } else {
     state.mails.push(mail);
