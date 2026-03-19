@@ -31,7 +31,7 @@
           <img
             v-for="asset in imageAssets"
             :key="asset.id"
-            :src="asset.filepath"
+            :src="asset.display_path || asset.filepath"
             :alt="asset.mime_type || asset.type"
           />
         </div>

@@ -27,6 +27,9 @@ export interface Tag {
 export interface AssetRecord {
   id: string;
   filepath: string;
+  uri?: string;
+  display_path?: string;
+  filename?: string;
   type: AssetType;
   upload_order: number;
   mime_type?: string;
@@ -125,3 +128,17 @@ export interface AppState {
   last_opened_my_panel: MyPanel;
 }
 
+export interface AppStateAssetExport {
+  asset_id: string;
+  filepath: string;
+  filename?: string;
+  mime_type?: string;
+  data_url: string;
+}
+
+export interface AppStateExportBundle {
+  schema_version: number;
+  exported_at: string;
+  data: AppState;
+  assets?: AppStateAssetExport[];
+}

@@ -11,7 +11,7 @@
         <ion-card class="sketch-card">
           <ion-card-header>
             <ion-card-title>入口</ion-card-title>
-            <ion-card-subtitle>对应 plan 里的 Mailbox / Diary / Setting / Data。</ion-card-subtitle>
+            <ion-card-subtitle>对应 plan 中的 Mailbox / Diary / Setting / Data。</ion-card-subtitle>
           </ion-card-header>
           <ion-card-content>
             <div class="row wrap">
@@ -65,7 +65,7 @@
           <ion-card class="sketch-card">
             <ion-card-header>
               <ion-card-title>Diary</ion-card-title>
-              <ion-card-subtitle>当前先按自然日聚合为单栏“书页式”预览。</ion-card-subtitle>
+            <ion-card-subtitle>当前按自然日聚合，适合快速预览和导出 Diary。</ion-card-subtitle>
             </ion-card-header>
             <ion-card-content class="card-stack">
               <div v-for="group in store.diaryGroups.value" :key="group.date" class="preview-card" style="padding: 12px;">
@@ -95,6 +95,18 @@
         </section>
 
         <section v-else-if="store.state.last_opened_my_panel === 'setting'" class="card-stack">
+          <ion-card class="sketch-card">
+            <ion-card-header>
+              <ion-card-title>Runtime</ion-card-title>
+            </ion-card-header>
+            <ion-card-content class="card-stack">
+              <div class="empty-note">
+                当前平台：{{ platformLabel }}<br />
+                存储驱动：{{ databaseService.driverLabel }}
+              </div>
+            </ion-card-content>
+          </ion-card>
+
           <ion-card class="sketch-card">
             <ion-card-header>
               <ion-card-title>Config</ion-card-title>
@@ -198,13 +210,13 @@
           <ion-card class="sketch-card">
             <ion-card-header>
               <ion-card-title>Data</ion-card-title>
-              <ion-card-subtitle>当前支持本地 Json/HTML 导入导出。</ion-card-subtitle>
+              <ion-card-subtitle>JSON 会打包结构化数据和媒体内容；HTML 仍用于轻量导出预览。</ion-card-subtitle>
             </ion-card-header>
             <ion-card-content class="card-stack">
-              <ion-button @click="store.exportJsonSnapshot()">Export Json</ion-button>
-              <ion-button fill="outline" @click="importInput?.click()">Import Json</ion-button>
-              <ion-button fill="outline" @click="store.exportDiaryHtml()">Export Diary</ion-button>
-              <ion-button fill="outline" @click="store.exportMailsHtml()">Export Mails</ion-button>
+              <ion-button :disabled="busy" @click="runAction(() => store.exportJsonSnapshot())">Export Json</ion-button>
+              <ion-button fill="outline" :disabled="busy" @click="importInput?.click()">Import Json</ion-button>
+              <ion-button fill="outline" :disabled="busy" @click="runAction(() => store.exportDiaryHtml())">Export Diary</ion-button>
+              <ion-button fill="outline" :disabled="busy" @click="runAction(() => store.exportMailsHtml())">Export Mails</ion-button>
               <input ref="importInput" hidden accept="application/json" type="file" @change="handleImport" />
 
               <div class="empty-note">
@@ -219,7 +231,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import {
   IonButton,
@@ -237,12 +249,14 @@ import {
   IonToolbar,
 } from '@ionic/vue';
 
+import { databaseService, getCapacitorPlatform, isNativePlatform } from '../services';
 import { useAppStore } from '../store/app-store';
 import type { MyPanel, SummaryInterval } from '../types/models';
 
 const router = useRouter();
 const store = useAppStore();
 const importInput = ref<HTMLInputElement | null>(null);
+const busy = ref(false);
 
 const panels: Array<{ key: MyPanel; label: string }> = [
   { key: 'mailbox', label: 'Mailbox' },
@@ -250,6 +264,11 @@ const panels: Array<{ key: MyPanel; label: string }> = [
   { key: 'setting', label: 'Setting' },
   { key: 'data', label: 'Data' },
 ];
+
+const platformLabel = computed(() => {
+  const platform = getCapacitorPlatform();
+  return isNativePlatform() ? `${platform}（Native）` : `${platform}（Web fallback）`;
+});
 
 function openMail(id: string): void {
   router.push(`/mail/${id}`);
@@ -259,6 +278,17 @@ function generateSummary(interval: SummaryInterval): void {
   store.regenerateSummary(interval);
 }
 
+async function runAction(task: () => Promise<void>): Promise<void> {
+  busy.value = true;
+  try {
+    await task();
+  } catch (error) {
+    window.alert(error instanceof Error ? error.message : '操作失败');
+  } finally {
+    busy.value = false;
+  }
+}
+
 async function handleImport(domEvent: Event): Promise<void> {
   const input = domEvent.target as HTMLInputElement | null;
   const file = input?.files?.[0];
@@ -266,12 +296,16 @@ async function handleImport(domEvent: Event): Promise<void> {
     return;
   }
 
+  busy.value = true;
   try {
-    store.importJsonSnapshot(await file.text());
+    await store.importJsonSnapshot(await file.text());
   } catch (error) {
     window.alert(error instanceof Error ? error.message : '导入失败');
   } finally {
-    input.value = '';
+    if (input) {
+      input.value = '';
+    }
+    busy.value = false;
   }
 }
 </script>

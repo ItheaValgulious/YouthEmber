@@ -40,3 +40,21 @@ npm run dev
 - Camera / Geolocation / Local Notifications 原生插件
 - 服务端 Push / Pull 与同步
 
+
+## Capacitor Integration (Current)
+
+- Added `capacitor.config.ts`
+- Added `CameraService`, `FileService`, `LocationService`, `DatabaseService` under `src/services`
+- Native storage uses `@capacitor-community/sqlite`; web currently uses `Preferences` as a lightweight fallback
+- `New` page now supports camera capture, gallery import, media upload, and current-location capture
+- `Data` export now bundles structured state together with media payloads for re-import
+
+### Useful Commands
+
+```bash
+npm run build
+npm run cap:copy
+npm run cap:sync
+npm run cap:open:android
+npm run cap:open:ios
+```

@@ -1,11 +1,14 @@
-import { computed, reactive, watch } from 'vue';
+﻿import { computed, reactive, watch } from 'vue';
 
 import { createDefaultConfig, createDefaultFriends, createDefaultModels, createDefaultTags } from '../config/defaults';
 import { addDays, compareIsoDesc, diffDays, formatDateTime, toDateKey } from '../lib/date';
-import { buildDiaryHtml, buildMailBundleHtml, buildSummaryMailHtml, downloadTextFile } from '../lib/exporters';
+import { buildDiaryHtml, buildMailBundleHtml, buildSummaryMailHtml } from '../lib/exporters';
 import { dedupeTags, hasTagLabel, mergeTagCatalog, normalizeLabel, sortTagsForDisplay, tagKey } from '../lib/tag';
+import { databaseService, fileService } from '../services';
 import type {
   AppState,
+  AppStateAssetExport,
+  AppStateExportBundle,
   AssetRecord,
   CommentRecord,
   EventRecord,
@@ -19,7 +22,7 @@ import type {
   TagType,
 } from '../types/models';
 
-const STORAGE_KEY = 'ashdairy.state.v1';
+const LEGACY_STORAGE_KEY = 'ashdairy.state.v1';
 const RETRY_DELAYS = [1_000, 5_000, 10_000];
 const DEMO_MINUTE_MS = 1_000;
 const SUMMARY_WINDOWS: Record<SummaryInterval, number> = {
@@ -28,13 +31,15 @@ const SUMMARY_WINDOWS: Record<SummaryInterval, number> = {
   '1y': 365,
 };
 const SUMMARY_LABELS: Record<SummaryInterval, string> = {
-  '7d': '7日 Summary',
-  '3m': '3月 Summary',
-  '1y': '1年 Summary',
+  '7d': '7d Summary',
+  '3m': '3m Summary',
+  '1y': '1y Summary',
 };
 
 let aiTimer: number | null = null;
 let bootstrapped = false;
+let persistTimer: number | null = null;
+let persistChain = Promise.resolve();
 
 function randomId(prefix: string): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
@@ -64,6 +69,24 @@ function cloneEvent(event: EventRecord): EventRecord {
   };
 }
 
+function normalizeAsset(raw: Partial<AssetRecord>): AssetRecord {
+  return {
+    id: raw.id ?? randomId('asset'),
+    filepath: raw.filepath ?? '',
+    uri: raw.uri,
+    display_path: raw.display_path,
+    filename: raw.filename,
+    type: raw.type ?? 'image',
+    upload_order: raw.upload_order ?? 0,
+    mime_type: raw.mime_type,
+    size_bytes: raw.size_bytes,
+    width: raw.width,
+    height: raw.height,
+    duration_ms: raw.duration_ms,
+    thumbnail_path: raw.thumbnail_path,
+  };
+}
+
 function normalizeEvent(raw: Partial<EventRecord>): EventRecord {
   return {
     id: raw.id ?? randomId('evt'),
@@ -72,7 +95,7 @@ function normalizeEvent(raw: Partial<EventRecord>): EventRecord {
     title: raw.title ?? '',
     raw: raw.raw ?? '',
     tags: Array.isArray(raw.tags) ? raw.tags.map(cloneTag) : [],
-    assets: Array.isArray(raw.assets) ? raw.assets.map((asset) => ({ ...asset })) : [],
+    assets: Array.isArray(raw.assets) ? raw.assets.map(normalizeAsset) : [],
     comments: Array.isArray(raw.comments) ? raw.comments.map((comment) => ({ ...comment })) : [],
   };
 }
@@ -128,13 +151,13 @@ function makeWelcomeMail(): MailRecord {
   return {
     id: randomId('mail'),
     time: new Date().toISOString(),
-    title: '欢迎来到 AshDiary',
+    title: '娆㈣繋鏉ュ埌 AshDiary',
     sender: 'AshDiary AI',
     content: `
       <article style="padding:24px;font-family:'Segoe UI',sans-serif;background:#fffaf0;color:#2d2115">
-        <h1 style="margin-top:0">欢迎来到 AshDiary</h1>
-        <p>第一版已经搭好主流程：记录 Event、管理 Task、查看 Mail、生成 Diary、维护 Settings 和导入导出数据。</p>
-        <p>在这个 demo 里，AI 补全会以秒级异步方式模拟，你可以先发一条记录，稍后看看标题、标签和 Friend 评论如何补上。</p>
+        <h1 style="margin-top:0">娆㈣繋鏉ュ埌 AshDiary</h1>
+        <p>绗竴鐗堝凡缁忔惌濂戒富娴佺▼锛氳褰?Event銆佺鐞?Task銆佹煡鐪?Mail銆佺敓鎴?Diary銆佺淮鎶?Settings 鍜屽鍏ュ鍑烘暟鎹€?/p>
+        <p>鍦ㄨ繖涓?demo 閲岋紝AI 琛ュ叏浼氫互绉掔骇寮傛鏂瑰紡妯℃嫙锛屼綘鍙互鍏堝彂涓€鏉¤褰曪紝绋嶅悗鐪嬬湅鏍囬銆佹爣绛惧拰 Friend 璇勮濡備綍琛ヤ笂銆?/p>
       </article>
     `.trim(),
   };
@@ -150,8 +173,8 @@ function createInitialState(): AppState {
     id: randomId('evt'),
     created_at: createdAt,
     time: createdAt,
-    title: '第一天的记录',
-    raw: '今天把第一版计划整理清楚了，也把要做的功能拆成了可执行的闭环。',
+    title: 'Capacitor 接入准备完成',
+    raw: '这条记录用于验证事件流、异步 AI 补全和本地持久化链路是否正常工作。',
     tags: dedupeTags(
       tags
         .filter((tag) => ['discovery', 'happy'].includes(normalizeLabel(tag.label)))
@@ -165,8 +188,8 @@ function createInitialState(): AppState {
     id: randomId('evt'),
     created_at: now.toISOString(),
     time: dueAt,
-    title: '把第一篇日记写下来',
-    raw: '在 Tasks 页试着创建、完成或放弃一个任务，熟悉这套流程。',
+    title: '试一条移动端任务流',
+    raw: '去 Tasks 页创建、完成或放弃一个任务，确认 task + ongoing / finished / not_finished 状态链路。',
     tags: dedupeTags(
       tags
         .filter((tag) => ['task', 'ongoing', 'life'].includes(normalizeLabel(tag.label)))
@@ -227,35 +250,58 @@ function normalizeState(raw: Partial<AppState> | undefined): AppState {
   };
 }
 
-function loadState(): AppState {
-  if (typeof localStorage === 'undefined') {
-    return createInitialState();
-  }
+const state = reactive(createInitialState()) as AppState;
 
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      return createInitialState();
+function snapshotState(): AppState {
+  return JSON.parse(JSON.stringify(state)) as AppState;
+}
+
+async function hydrateAssets(events: EventRecord[]): Promise<void> {
+  for (const event of events) {
+    const hydratedAssets: AssetRecord[] = [];
+
+    for (const asset of event.assets) {
+      hydratedAssets.push(await fileService.hydrateAsset(asset));
     }
 
-    const parsed = JSON.parse(raw) as Partial<AppState>;
-    return normalizeState(parsed);
-  } catch {
-    return createInitialState();
+    event.assets = hydratedAssets;
   }
 }
 
-const state = reactive(loadState()) as AppState;
+async function persistState(): Promise<void> {
+  if (!bootstrapped) {
+    return;
+  }
 
-if (typeof localStorage !== 'undefined') {
-  watch(
-    state,
-    () => {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    },
-    { deep: true },
-  );
+  const payload = snapshotState();
+  persistChain = persistChain
+    .catch(() => undefined)
+    .then(() => databaseService.saveAppState(payload));
+  await persistChain;
 }
+
+function schedulePersist(): void {
+  if (!bootstrapped || typeof window === 'undefined') {
+    return;
+  }
+
+  if (persistTimer) {
+    window.clearTimeout(persistTimer);
+    persistTimer = null;
+  }
+
+  persistTimer = window.setTimeout(() => {
+    void persistState();
+  }, 180);
+}
+
+watch(
+  state,
+  () => {
+    schedulePersist();
+  },
+  { deep: true },
+);
 
 const sortedEvents = computed(() => [...state.events].sort(compareEventsDesc));
 
@@ -330,7 +376,7 @@ function ensureTag(label: string, type: TagType, rules: string, system = false):
 }
 
 function getSystemTag(label: string): Tag {
-  return ensureTag(label, 'others', `系统保留：${label}`, true);
+  return ensureTag(label, 'others', `绯荤粺淇濈暀锛?{label}`, true);
 }
 
 function registerTagUsage(tags: Tag[], time: string): Tag[] {
@@ -381,7 +427,7 @@ function extractKeywordTags(text: string): Tag[] {
       type: 'nature' as const,
       label: 'work',
       words: ['工作', '项目', '需求', '会议', '上线', '代码', 'bug', 'review'],
-      rule: '工作、交付、项目推进相关内容',
+      rule: '工作、项目、交付相关内容',
     },
     {
       type: 'nature' as const,
@@ -393,7 +439,7 @@ function extractKeywordTags(text: string): Tag[] {
       type: 'nature' as const,
       label: 'discovery',
       words: ['发现', '尝试', '灵感', '第一次', '原来', '实验'],
-      rule: '新发现、新尝试与灵感',
+      rule: '新发现、新尝试与灵感相关',
     },
     {
       type: 'nature' as const,
@@ -428,7 +474,7 @@ function extractKeywordTags(text: string): Tag[] {
     {
       type: 'mood' as const,
       label: 'upset',
-      words: ['烦', '累', '崩溃', '生气', '难过', '焦虑'],
+      words: ['累', '烦', '崩溃', '生气', '难过', '焦虑'],
       rule: '消耗、疲惫、低落',
     },
   ];
@@ -484,7 +530,7 @@ function buildFriendComment(friend: FriendRecord, event: EventRecord): { attitud
     if (friend.id === 'friend_moss') {
       return {
         attitude,
-        comment: '这个任务已经被你真正落地了，下一次可以直接沿着这股节奏继续推进。',
+        comment: '这次任务已经被你真正落地了，下一次可以继续沿着这股节奏推进。',
       };
     }
 
@@ -607,7 +653,7 @@ function arrangeTagsIfNeeded(): void {
       id: randomId('tag'),
       label: word,
       type: 'others',
-      rules: '从最近 50 条 Event 中整理出的主题',
+      rules: '从最近 50 条 Event 中整理出的高频主题',
       payload: null,
       system: false,
       last_used_at: new Date().toISOString(),
@@ -824,7 +870,7 @@ function buildSummary(interval: SummaryInterval, rangeEnd: string, force: boolea
 
   const moodSummary =
     moodTotal > 2
-      ? '整体心情偏正向，说明这段时间有不少让你获得反馈或成就感的时刻。'
+      ? '整体情绪偏正向，说明这段时间有不少让你获得反馈或成就感的时刻。'
       : moodTotal < -1
         ? '这一段偏消耗，建议把节奏放缓一点，优先保护恢复力。'
         : '整体情绪比较平稳，既有起伏，也保留了继续前进的空间。';
@@ -964,22 +1010,41 @@ function scheduleAiPump(): void {
   aiTimer = window.setTimeout(runDueAiJobs, Math.max(16, nextRun - Date.now()));
 }
 
-function exportJsonSnapshot(): void {
-  const payload = {
+async function buildAssetExportList(): Promise<AppStateAssetExport[]> {
+  const bundles: AppStateAssetExport[] = [];
+
+  for (const event of state.events) {
+    for (const asset of event.assets) {
+      bundles.push({
+        asset_id: asset.id,
+        filepath: asset.filepath,
+        filename: asset.filename,
+        mime_type: asset.mime_type,
+        data_url: await fileService.readAssetAsDataUrl(asset),
+      });
+    }
+  }
+
+  return bundles;
+}
+
+async function exportJsonSnapshot(): Promise<void> {
+  const payload: AppStateExportBundle = {
     schema_version: 1,
     exported_at: new Date().toISOString(),
-    data: JSON.parse(JSON.stringify(state)) as AppState,
+    data: snapshotState(),
+    assets: await buildAssetExportList(),
   };
 
-  downloadTextFile(
+  await fileService.exportTextFile(
     `ashdairy-${toDateKey(new Date())}.json`,
     JSON.stringify(payload, null, 2),
     'application/json;charset=utf-8',
   );
 }
 
-function importJsonSnapshot(text: string): void {
-  const parsed = JSON.parse(text) as { schema_version?: number; data?: Partial<AppState> };
+async function importJsonSnapshot(text: string): Promise<void> {
+  const parsed = JSON.parse(text) as Partial<AppStateExportBundle> & { data?: Partial<AppState> };
 
   if ((parsed.schema_version ?? 1) !== 1) {
     throw new Error('暂不支持该 schema_version');
@@ -989,27 +1054,58 @@ function importJsonSnapshot(text: string): void {
     return;
   }
 
-  const next = normalizeState(parsed.data ?? parsed);
+  const next = normalizeState(parsed.data ?? (parsed as Partial<AppState>));
+  const assetMap = new Map((parsed.assets ?? []).map((asset) => [asset.asset_id, asset]));
+
+  for (const event of next.events) {
+    const restoredAssets: AssetRecord[] = [];
+
+    for (const asset of event.assets) {
+      const bundle = assetMap.get(asset.id);
+      restoredAssets.push(bundle ? await fileService.restoreAsset(bundle, asset) : await fileService.hydrateAsset(asset));
+    }
+
+    event.assets = restoredAssets;
+  }
+
   replaceState(next);
   scheduleAiPump();
+  ensureDailySummaries(true);
+  schedulePersist();
 }
 
-function exportDiaryHtml(): void {
-  downloadTextFile(
+async function exportDiaryHtml(): Promise<void> {
+  const groups = await Promise.all(
+    diaryGroups.value.map(async (group) => ({
+      date: group.date,
+      events: await Promise.all(
+        group.events.map(async (event) => ({
+          ...cloneEvent(event),
+          assets: await Promise.all(
+            event.assets.map(async (asset) => ({
+              ...asset,
+              display_path: await fileService.readAssetAsDataUrl(asset),
+            })),
+          ),
+        })),
+      ),
+    })),
+  );
+
+  await fileService.exportTextFile(
     `ashdairy-diary-${toDateKey(new Date())}.html`,
-    buildDiaryHtml(diaryGroups.value),
+    buildDiaryHtml(groups),
     'text/html;charset=utf-8',
   );
 }
 
-function exportMailsHtml(): void {
-  downloadTextFile(
+async function exportMailsHtml(): Promise<void> {
+  await fileService.exportTextFile(
     `ashdairy-mails-${toDateKey(new Date())}.html`,
     buildMailBundleHtml(sortedMails.value),
     'text/html;charset=utf-8',
   );
 }
-
 function addModel(): void {
   state.models.push({
     id: randomId('model'),
@@ -1052,12 +1148,32 @@ function regenerateSummary(interval: SummaryInterval): void {
   queueSummary(interval, true);
 }
 
-function bootstrapStore(): void {
+export async function initializeAppStore(): Promise<void> {
   if (bootstrapped) {
     return;
   }
 
+  await databaseService.initialize();
+  const loaded = await databaseService.loadAppState();
+  const legacyRaw =
+    !loaded && typeof localStorage !== 'undefined' ? localStorage.getItem(LEGACY_STORAGE_KEY) : null;
+  let legacyState: Partial<AppState> | null = null;
+
+  if (legacyRaw) {
+    try {
+      legacyState = JSON.parse(legacyRaw) as Partial<AppState>;
+    } catch {
+      legacyState = null;
+    }
+  }
+  const next = normalizeState(loaded ?? legacyState ?? undefined);
+  await hydrateAssets(next.events);
+  replaceState(next);
   bootstrapped = true;
+  if (legacyRaw && typeof localStorage !== 'undefined') {
+    localStorage.removeItem(LEGACY_STORAGE_KEY);
+    await databaseService.saveAppState(snapshotState());
+  }
   ensureDailySummaries();
   scheduleAiPump();
 }
@@ -1095,8 +1211,6 @@ export function useAppStore(): {
   exportDiaryHtml: typeof exportDiaryHtml;
   exportMailsHtml: typeof exportMailsHtml;
 } {
-  bootstrapStore();
-
   return {
     state,
     sortedEvents,
@@ -1131,3 +1245,5 @@ export function useAppStore(): {
     exportMailsHtml,
   };
 }
+
+

@@ -31,10 +31,12 @@
 
             <div v-if="event.assets.length" class="preview-grid">
               <div v-for="asset in event.assets" :key="asset.id" class="preview-card">
-                <img v-if="asset.type === 'image'" :src="asset.filepath" alt="asset" />
-                <video v-else-if="asset.type === 'video'" :src="asset.filepath" controls />
+                <img v-if="asset.type === 'image'" :src="asset.display_path || asset.filepath" alt="asset" />
+                <video v-else-if="asset.type === 'video'" :src="asset.display_path || asset.filepath" controls />
                 <div v-else class="preview-meta">🎵 {{ asset.mime_type || 'audio' }}</div>
-                <div class="preview-meta">{{ asset.type }}</div>
+                <div class="preview-meta">
+                  {{ asset.filename || asset.type }}
+                </div>
               </div>
             </div>
 
@@ -84,7 +86,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import {
   IonBackButton,
@@ -102,19 +104,25 @@ import {
   IonToolbar,
 } from '@ionic/vue';
 
+import { databaseService } from '../services';
 import { useAppStore } from '../store/app-store';
 
-const COMMENT_SORT_KEY = 'ashdairy.comment.sort';
+const COMMENT_SORT_KEY = 'ui.comment.sort';
 
 const route = useRoute();
 const store = useAppStore();
 const commentDraft = ref('');
-const commentOrder = ref<'desc' | 'asc'>(
-  localStorage.getItem(COMMENT_SORT_KEY) === 'asc' ? 'asc' : 'desc',
-);
+const commentOrder = ref<'desc' | 'asc'>('desc');
+
+onMounted(async () => {
+  const saved = await databaseService.getJson<'desc' | 'asc'>(COMMENT_SORT_KEY);
+  if (saved === 'asc' || saved === 'desc') {
+    commentOrder.value = saved;
+  }
+});
 
 watch(commentOrder, (value) => {
-  localStorage.setItem(COMMENT_SORT_KEY, value);
+  void databaseService.setJson(COMMENT_SORT_KEY, value);
 });
 
 const event = computed(() => store.getEventById(String(route.params.id)));
