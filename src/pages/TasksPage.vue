@@ -11,17 +11,16 @@
         <ion-card class="sketch-card">
           <ion-card-header>
             <ion-card-title>新建 Task</ion-card-title>
-            <ion-card-subtitle>第一行作为标题，后续内容作为 raw。</ion-card-subtitle>
           </ion-card-header>
           <ion-card-content class="card-stack">
             <textarea
               v-model="draft"
               class="native-textarea"
-              placeholder="例如：&#10;把周报写完&#10;整理这周进展和风险"
+              placeholder="写下要做的事。"
             />
 
             <label>
-              <div class="section-title">截止时间（可选）</div>
+              <div class="section-title">截止时间</div>
               <input v-model="dueAt" class="native-input" type="datetime-local" />
             </label>
 
@@ -42,7 +41,7 @@
         />
 
         <div v-if="!store.ongoingTasks.value.length" class="empty-note">
-          当前没有进行中的任务。新建一个试试，或者去 Event Flow 看完整记录。
+          当前没有进行中的任务。
         </div>
       </div>
     </ion-content>
@@ -56,7 +55,6 @@ import {
   IonCard,
   IonCardContent,
   IonCardHeader,
-  IonCardSubtitle,
   IonCardTitle,
   IonContent,
   IonHeader,

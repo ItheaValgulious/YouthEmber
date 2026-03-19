@@ -11,16 +11,22 @@
         <div class="section-title">筛选</div>
         <ion-searchbar v-model="query" placeholder="搜索标题、正文或标签" />
 
-        <div class="tag-row" style="margin-top: 12px;">
-          <button
-            v-for="tag in filterTags"
-            :key="`${tag.type}-${tag.label}`"
-            class="tag-chip"
-            :class="{ 'is-selected': selectedTags.includes(tag.label) }"
-            @click="toggleTag(tag.label)"
-          >
-            {{ tag.label }}
-          </button>
+        <div class="card-stack" style="margin-top: 12px;">
+          <div class="row wrap">
+            <ion-button fill="outline" @click="tagsWindowOpen = true">
+              标签筛选
+            </ion-button>
+          </div>
+
+          <div v-if="selectedFilterTags.length" class="tag-row">
+            <span
+              v-for="tag in selectedFilterTags"
+              :key="`${tag.type}:${tag.label}`"
+              class="tag-chip is-selected"
+            >
+              {{ tag.label }}
+            </span>
+          </div>
         </div>
 
         <div style="margin-top: 16px;" class="card-stack">
@@ -38,21 +44,35 @@
         </div>
       </div>
     </ion-content>
+
+    <TagsWindow
+      :open="tagsWindowOpen"
+      mode="filter"
+      :tags="filterableTags"
+      :selected-keys="selectedTagKeys"
+      @cancel="tagsWindowOpen = false"
+      @apply="applyTags"
+    />
   </ion-page>
 </template>
 
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import { IonContent, IonHeader, IonPage, IonSearchbar, IonTitle, IonToolbar } from '@ionic/vue';
+import { IonButton, IonContent, IonHeader, IonPage, IonSearchbar, IonTitle, IonToolbar } from '@ionic/vue';
 
 import EventCard from '../components/EventCard.vue';
+import TagsWindow from '../components/TagsWindow.vue';
 import { useAppStore } from '../store/app-store';
 
 const store = useAppStore();
 const query = ref('');
-const selectedTags = ref<string[]>([]);
+const selectedTagKeys = ref<string[]>([]);
+const tagsWindowOpen = ref(false);
 
-const filterTags = computed(() => store.availableTags.value.filter((tag) => !tag.system).slice(0, 16));
+const filterableTags = computed(() => store.availableTags.value.filter((tag) => !tag.system));
+const selectedFilterTags = computed(() =>
+  filterableTags.value.filter((tag) => selectedTagKeys.value.includes(`${tag.type}:${tag.label}`)),
+);
 
 const filteredEvents = computed(() => {
   const keyword = query.value.trim().toLowerCase();
@@ -65,8 +85,10 @@ const filteredEvents = computed(() => {
     }
 
     if (
-      selectedTags.value.length &&
-      !selectedTags.value.every((label) => event.tags.some((tag) => tag.label === label))
+      selectedTagKeys.value.length &&
+      !selectedTagKeys.value.every((key) =>
+        event.tags.some((tag) => `${tag.type}:${tag.label}` === key),
+      )
     ) {
       return false;
     }
@@ -75,12 +97,8 @@ const filteredEvents = computed(() => {
   });
 });
 
-function toggleTag(label: string): void {
-  if (selectedTags.value.includes(label)) {
-    selectedTags.value = selectedTags.value.filter((item) => item !== label);
-    return;
-  }
-
-  selectedTags.value = [...selectedTags.value, label];
+function applyTags(payload: { selectedKeys: string[] }): void {
+  selectedTagKeys.value = payload.selectedKeys;
+  tagsWindowOpen.value = false;
 }
 </script>

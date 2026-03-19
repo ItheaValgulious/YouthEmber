@@ -1,10 +1,17 @@
 ﻿import { computed, reactive, watch } from 'vue';
 
-import { createDefaultConfig, createDefaultFriends, createDefaultModels, createDefaultTags } from '../config/defaults';
+import {
+  createDefaultConfig,
+  createDefaultFriendDraft,
+  createDefaultFriends,
+  createDefaultModels,
+  createDefaultTags,
+} from '../config/defaults';
 import { addDays, compareIsoDesc, diffDays, formatDateTime, toDateKey } from '../lib/date';
 import { buildDiaryHtml, buildMailBundleHtml, buildSummaryMailHtml } from '../lib/exporters';
-import { dedupeTags, hasTagLabel, mergeTagCatalog, normalizeLabel, sortTagsForDisplay, tagKey } from '../lib/tag';
-import { databaseService, fileService } from '../services';
+import { dedupeTags, hasTagLabel, mergeTagCatalog, normalizeLabel, sortTagsForDisplay } from '../lib/tag';
+import { aiService, databaseService, fileService } from '../services';
+import type { AiTagDraft } from '../services/ai-service';
 import type {
   AppState,
   AppStateAssetExport,
@@ -23,8 +30,8 @@ import type {
 } from '../types/models';
 
 const LEGACY_STORAGE_KEY = 'ashdairy.state.v1';
-const RETRY_DELAYS = [1_000, 5_000, 10_000];
-const DEMO_MINUTE_MS = 1_000;
+const RETRY_DELAYS = [60_000, 5 * 60_000, 10 * 60_000];
+const DEMO_DELAY_UNIT_MS = 120;
 const SUMMARY_WINDOWS: Record<SummaryInterval, number> = {
   '7d': 7,
   '3m': 90,
@@ -151,13 +158,13 @@ function makeWelcomeMail(): MailRecord {
   return {
     id: randomId('mail'),
     time: new Date().toISOString(),
-    title: '娆㈣繋鏉ュ埌 AshDiary',
+    title: '欢迎来到 AshDiary',
     sender: 'AshDiary AI',
     content: `
       <article style="padding:24px;font-family:'Segoe UI',sans-serif;background:#fffaf0;color:#2d2115">
-        <h1 style="margin-top:0">娆㈣繋鏉ュ埌 AshDiary</h1>
-        <p>绗竴鐗堝凡缁忔惌濂戒富娴佺▼锛氳褰?Event銆佺鐞?Task銆佹煡鐪?Mail銆佺敓鎴?Diary銆佺淮鎶?Settings 鍜屽鍏ュ鍑烘暟鎹€?/p>
-        <p>鍦ㄨ繖涓?demo 閲岋紝AI 琛ュ叏浼氫互绉掔骇寮傛鏂瑰紡妯℃嫙锛屼綘鍙互鍏堝彂涓€鏉¤褰曪紝绋嶅悗鐪嬬湅鏍囬銆佹爣绛惧拰 Friend 璇勮濡備綍琛ヤ笂銆?/p>
+        <h1 style="margin-top:0">欢迎来到 AshDiary</h1>
+        <p>现在主流程已经接通真实 AI：记录 Event、创建 Task、生成 Friend 评论、生成 Summary Mail 都会走异步 AI 队列。</p>
+        <p>首次使用前，请先到 Setting 里配置至少一个可用的 Model。当前约定是：<code>model.id</code> 作为实际请求的远端模型标识，标题、tag、summary、tag arrange 默认使用列表中的首个可用模型。</p>
       </article>
     `.trim(),
   };
@@ -418,167 +425,79 @@ function getMailById(id: string): MailRecord | undefined {
   return state.mails.find((mail) => mail.id === id);
 }
 
-function extractKeywordTags(text: string): Tag[] {
-  const normalized = text.toLowerCase();
-  const inferred: Tag[] = [];
-
-  const rules = [
-    {
-      type: 'nature' as const,
-      label: 'work',
-      words: ['工作', '项目', '需求', '会议', '上线', '代码', 'bug', 'review'],
-      rule: '工作、项目、交付相关内容',
-    },
-    {
-      type: 'nature' as const,
-      label: 'academy',
-      words: ['学习', '考试', '课程', '读书', '练习', '题目'],
-      rule: '学习、阅读与训练相关内容',
-    },
-    {
-      type: 'nature' as const,
-      label: 'discovery',
-      words: ['发现', '尝试', '灵感', '第一次', '原来', '实验'],
-      rule: '新发现、新尝试与灵感相关',
-    },
-    {
-      type: 'nature' as const,
-      label: 'life',
-      words: ['散步', '吃饭', '家里', '朋友', '出门', '生活', '睡觉'],
-      rule: '生活与日常相关内容',
-    },
-    {
-      type: 'mood' as const,
-      label: 'happy',
-      words: ['开心', '高兴', '顺利', '满意', '轻松', '快乐'],
-      rule: '积极、愉快、轻盈的状态',
-    },
-    {
-      type: 'mood' as const,
-      label: 'moved',
-      words: ['感动', '被照顾', '谢谢', '温暖'],
-      rule: '被触动、被支持、被安慰',
-    },
-    {
-      type: 'mood' as const,
-      label: 'surprise',
-      words: ['惊讶', '没想到', '居然', '意外'],
-      rule: '惊喜和意外',
-    },
-    {
-      type: 'mood' as const,
-      label: 'hesitant',
-      words: ['犹豫', '纠结', '迟疑', '不确定'],
-      rule: '犹豫和摇摆',
-    },
-    {
-      type: 'mood' as const,
-      label: 'upset',
-      words: ['累', '烦', '崩溃', '生气', '难过', '焦虑'],
-      rule: '消耗、疲惫、低落',
-    },
-  ];
-
-  rules.forEach((rule) => {
-    if (rule.words.some((word) => normalized.includes(word.toLowerCase()))) {
-      inferred.push(ensureTag(rule.label, rule.type, rule.rule));
-    }
-  });
-
-  if (normalized.includes('妈妈')) {
-    inferred.push(ensureTag('妈妈', 'people', '和妈妈有关的人物标签'));
+function truncateText(value: string, maxLength: number): string {
+  const clean = value.replace(/\s+/g, ' ').trim();
+  if (clean.length <= maxLength) {
+    return clean;
   }
 
-  if (normalized.includes('爸爸')) {
-    inferred.push(ensureTag('爸爸', 'people', '和爸爸有关的人物标签'));
-  }
-
-  if (normalized.includes('同事')) {
-    inferred.push(ensureTag('同事', 'people', '和同事有关的人物标签'));
-  }
-
-  return dedupeTags(inferred);
+  return `${clean.slice(0, maxLength)}…`;
 }
 
-function deriveTitle(event: EventRecord): string {
-  const source = [event.title, event.raw]
-    .map((item) => item.trim())
-    .filter(Boolean)
-    .join('\n')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-  if (!source) {
-    return isTask(event) ? '未命名任务' : '新的记录';
+function getPrimaryModel(): ModelRecord {
+  const model = state.models.find((item) => item.id.trim() && item.base_url.trim()) ?? state.models[0];
+  if (!model) {
+    throw new Error('当前没有可用的 AI 模型配置');
   }
 
-  return source.length > 18 ? `${source.slice(0, 18)}…` : source;
+  return model;
+}
+
+function getModelById(id: string): ModelRecord | undefined {
+  return state.models.find((model) => model.id === id);
+}
+
+function getFriendModel(friend: FriendRecord): ModelRecord {
+  return getModelById(friend.model_id) ?? getPrimaryModel();
+}
+
+function taskStateOf(event: EventRecord): 'event' | 'ongoing' | 'finished' | 'failed' {
+  if (!isTask(event)) {
+    return 'event';
+  }
+
+  if (isFinishedTask(event)) {
+    return 'finished';
+  }
+
+  if (isFailedTask(event)) {
+    return 'failed';
+  }
+
+  return 'ongoing';
+}
+
+function ensureTagFromDraft(draft: AiTagDraft): Tag {
+  const existing = findTag(draft.label, draft.type);
+  if (existing) {
+    existing.rules = draft.rules || existing.rules;
+    if (draft.type === 'location' && draft.payload) {
+      existing.payload = { ...draft.payload };
+    }
+    return cloneTag(existing);
+  }
+
+  const created: Tag = {
+    id: randomId('tag'),
+    label: draft.label,
+    type: draft.type,
+    rules: draft.rules,
+    system: false,
+    payload: draft.type === 'location' ? draft.payload ?? null : null,
+    last_used_at: null,
+  };
+  state.tags.push(created);
+  return cloneTag(created);
+}
+
+function materializeAiTags(drafts: AiTagDraft[]): Tag[] {
+  return drafts.map((draft) => ensureTagFromDraft(draft));
 }
 
 function moodScoreOf(event: EventRecord): number {
   return event.tags
     .filter((tag) => tag.type === 'mood')
     .reduce((sum, tag) => sum + (state.config.mood_weights[normalizeLabel(tag.label)] ?? 0), 0);
-}
-
-function buildFriendComment(friend: FriendRecord, event: EventRecord): { attitude: number; comment: string } {
-  const score = moodScoreOf(event);
-  const taskBonus = isFinishedTask(event) ? 0.18 : isFailedTask(event) ? -0.08 : 0;
-  const attitude = clamp(Number((0.5 + score * 0.08 + taskBonus).toFixed(2)), 0.12, 0.88);
-
-  if (isFinishedTask(event)) {
-    if (friend.id === 'friend_moss') {
-      return {
-        attitude,
-        comment: '这次任务已经被你真正落地了，下一次可以继续沿着这股节奏推进。',
-      };
-    }
-
-    if (friend.id === 'friend_aster') {
-      return {
-        attitude,
-        comment: '完成的这一刻很亮，像把之前犹豫的部分也一起点亮了。',
-      };
-    }
-
-    return {
-      attitude,
-      comment: '你把它做完了，这种兑现感很珍贵，记得给自己一点肯定。',
-    };
-  }
-
-  if (isFailedTask(event)) {
-    if (friend.id === 'friend_moss') {
-      return {
-        attitude,
-        comment: '这次没有收住也没关系，重要的是你已经留下了结果，后面可以换个更小的下一步。',
-      };
-    }
-
-    return {
-      attitude,
-      comment: '先别急着责怪自己，能诚实地记录失败，本身就是继续往前的起点。',
-    };
-  }
-
-  if (score > 1) {
-    return {
-      attitude,
-      comment: friend.id === 'friend_aster' ? '今天像有一点闪光从字里跑出来了。' : '看起来今天的状态不错，把这份轻快继续留住吧。',
-    };
-  }
-
-  if (score < 0) {
-    return {
-      attitude,
-      comment: friend.id === 'friend_nori' ? '辛苦了，先把感受放下来，别急着立刻把一切都处理好。' : '这条记录里有一点消耗感，下一步先照顾自己会更重要。',
-    };
-  }
-
-  return {
-    attitude,
-    comment: friend.id === 'friend_aster' ? '这件事也许不大，但值得被认真留住。' : '我看见你把今天认真存档了，这会慢慢形成自己的节奏。',
-  };
 }
 
 function queueJob(job: PendingAiJob): void {
@@ -601,26 +520,16 @@ function queueFriendJobs(event: EventRecord): void {
   state.friends
     .filter((friend) => friend.enabled)
     .forEach((friend) => {
-      const draft = buildFriendComment(friend, event);
-      const probability = clamp(friend.active * (1 - draft.attitude) * draft.attitude, 0, 1);
-
-      if (Math.random() > probability) {
-        return;
-      }
-
-      const delayMinutes = Math.round((friend.latency + draft.attitude * (1 - draft.attitude)) * 60);
-
       queueJob({
         id: randomId('job'),
         type: 'friend_comment',
         status: 'pending',
-        run_at: new Date(Date.now() + Math.max(1, delayMinutes) * DEMO_MINUTE_MS).toISOString(),
+        run_at: new Date(Date.now() + 500).toISOString(),
         retries: 0,
         payload: {
           event_id: event.id,
           friend_id: friend.id,
-          attitude: draft.attitude,
-          comment: draft.comment,
+          phase: 'generate',
         },
       });
     });
@@ -631,33 +540,18 @@ function arrangeTagsIfNeeded(): void {
     return;
   }
 
-  const existingKeys = new Set(state.tags.map((tag) => tagKey(tag)));
-  const wordCount = new Map<string, number>();
+  const exists = state.ai_jobs.some((job) => job.type === 'arrange_tags' && job.status === 'pending');
+  if (exists) {
+    return;
+  }
 
-  sortedEvents.value
-    .slice(0, 50)
-    .flatMap((event) => `${event.title} ${event.raw}`.match(/[A-Za-z0-9\u4e00-\u9fa5]{2,6}/g) ?? [])
-    .map((word) => word.trim())
-    .filter((word) => word.length >= 2)
-    .forEach((word) => {
-      wordCount.set(word, (wordCount.get(word) ?? 0) + 1);
-    });
-
-  const topWords = [...wordCount.entries()]
-    .filter(([word, count]) => count > 1 && !existingKeys.has(`others:${normalizeLabel(word)}`))
-    .sort((left, right) => right[1] - left[1])
-    .slice(0, 3);
-
-  topWords.forEach(([word]) => {
-    state.tags.push({
-      id: randomId('tag'),
-      label: word,
-      type: 'others',
-      rules: '从最近 50 条 Event 中整理出的高频主题',
-      payload: null,
-      system: false,
-      last_used_at: new Date().toISOString(),
-    });
+  queueJob({
+    id: randomId('job'),
+    type: 'arrange_tags',
+    status: 'pending',
+    run_at: new Date(Date.now() + 800).toISOString(),
+    retries: 0,
+    payload: {},
   });
 }
 
@@ -813,7 +707,7 @@ function summaryMetaKey(interval: SummaryInterval, rangeEnd: string): string {
   return `${interval}:${toDateKey(rangeEnd)}`;
 }
 
-function buildSummary(interval: SummaryInterval, rangeEnd: string, force: boolean): void {
+async function buildSummary(interval: SummaryInterval, rangeEnd: string, force: boolean): Promise<void> {
   const endDate = new Date(rangeEnd);
   const startDate = addDays(endDate, -(SUMMARY_WINDOWS[interval] - 1));
   const metaKey = summaryMetaKey(interval, rangeEnd);
@@ -847,7 +741,7 @@ function buildSummary(interval: SummaryInterval, rangeEnd: string, force: boolea
   const failed = tasks.filter((event) => isFailedTask(event)).length;
   const rest = tasks.filter((event) => isOngoingTask(event)).length;
   const total = finished + failed + rest;
-  const rate = total === 0 ? 0 : finished / total;
+  const rate = total === 0 ? 0 : Number((finished / total).toFixed(4));
 
   const moodTrackBase = [...relevantEvents]
     .sort((left, right) => new Date(effectiveTimeOf(left)).getTime() - new Date(effectiveTimeOf(right)).getTime())
@@ -859,26 +753,59 @@ function buildSummary(interval: SummaryInterval, rangeEnd: string, force: boolea
     }, []);
 
   const moodTotal = moodTrackBase.at(-1)?.[1] ?? 0;
-  const taskSummary =
-    total === 0
-      ? '这个周期里还没有形成足够的任务样本。'
-      : rate >= 0.7
-        ? '任务推进整体稳定，完成动作已经开始形成节奏。'
-        : rate >= 0.4
-          ? '有一部分任务落地，也有一些停在半路，后续可以把目标再拆小一点。'
-          : '这段时间更多是在积累和试探，下一轮更适合先抓住一个最小闭环。';
+  const dailyTotals = [...relevantEvents]
+    .sort((left, right) => new Date(effectiveTimeOf(left)).getTime() - new Date(effectiveTimeOf(right)).getTime())
+    .reduce<Map<string, number>>((totals, event) => {
+      const key = toDateKey(effectiveTimeOf(event));
+      totals.set(key, Number(((totals.get(key) ?? 0) + moodScoreOf(event)).toFixed(2)));
+      return totals;
+    }, new Map<string, number>());
 
-  const moodSummary =
-    moodTotal > 2
-      ? '整体情绪偏正向，说明这段时间有不少让你获得反馈或成就感的时刻。'
-      : moodTotal < -1
-        ? '这一段偏消耗，建议把节奏放缓一点，优先保护恢复力。'
-        : '整体情绪比较平稳，既有起伏，也保留了继续前进的空间。';
+  const toTaskSamples = (items: EventRecord[]): Array<{ title: string; time: string | null }> =>
+    items
+      .slice()
+      .sort(compareEventsDesc)
+      .slice(0, 8)
+      .map((event) => ({
+        title: truncateText(event.title || event.raw || '未命名任务', 40),
+        time: event.time,
+      }));
 
-  const overallSummary =
-    finished > failed
-      ? '你正在把记录从“记下来”慢慢推进到“做出来”，这是一个很好的开始。'
-      : '现在的重点不是追求完美，而是继续保持诚实记录和小步推进。';
+  const summaryCopy = await aiService.generateSummary({
+    model: getPrimaryModel(),
+    summary: {
+      interval,
+      rangeLabel: `${toDateKey(startDate)} → ${toDateKey(endDate)}`,
+      taskCounts: { finished, failed, rest, rate },
+      taskSamples: {
+        finished: toTaskSamples(tasks.filter((event) => isFinishedTask(event))),
+        failed: toTaskSamples(tasks.filter((event) => isFailedTask(event))),
+        rest: toTaskSamples(tasks.filter((event) => isOngoingTask(event))),
+      },
+      mood: {
+        total: Number(moodTotal.toFixed(2)),
+        track: moodTrackBase.map(([time, value]) => ({ time, value })),
+        dailyTotals: [...dailyTotals.entries()].map(([date, totalValue]) => ({
+          date,
+          total: totalValue,
+        })),
+      },
+      highlights: relevantEvents
+        .slice()
+        .sort(compareEventsDesc)
+        .slice(0, 12)
+        .map((event) => ({
+          time: event.time,
+          title: truncateText(event.title || '未命名记录', 40),
+          raw: truncateText(event.raw, 160),
+          tags: sortTagsForDisplay(event.tags)
+            .slice(0, 6)
+            .map((tag) => `${tag.type}:${tag.label}`),
+          comment_count: event.comments.length,
+          task_state: taskStateOf(event),
+        })),
+    },
+  });
 
   const mail: MailRecord = {
     id: existingIndex >= 0 ? state.mails[existingIndex].id : randomId('mail'),
@@ -889,10 +816,10 @@ function buildSummary(interval: SummaryInterval, rangeEnd: string, force: boolea
       interval,
       rangeLabel: `${toDateKey(startDate)} → ${toDateKey(endDate)}`,
       taskCounts: { finished, failed, rest, rate },
-      taskSummary,
+      taskSummary: summaryCopy.task_summary,
       moodTotal,
-      moodSummary,
-      overallSummary,
+      moodSummary: summaryCopy.mood_summary,
+      overallSummary: summaryCopy.overall_summary,
       moodTrack: moodTrackBase,
     }),
     summary_meta: {
@@ -909,7 +836,7 @@ function buildSummary(interval: SummaryInterval, rangeEnd: string, force: boolea
   }
 }
 
-function executeJob(job: PendingAiJob): void {
+async function executeJob(job: PendingAiJob): Promise<void> {
   try {
     if (job.type === 'enrich_event') {
       const event = getEventById(String(job.payload.event_id));
@@ -918,16 +845,22 @@ function executeJob(job: PendingAiJob): void {
         return;
       }
 
-      if (!event.title.trim()) {
-        event.title = deriveTitle(event);
+      const enrichment = await aiService.enrichEvent({
+        model: getPrimaryModel(),
+        event: cloneEvent(event),
+        existingTags: state.tags.filter((tag) => !tag.system).map(cloneTag),
+        isTask: isTask(event),
+      });
+
+      if (!event.title.trim() && enrichment.title) {
+        event.title = enrichment.title;
       }
 
-      const inferred = extractKeywordTags(`${event.title}\n${event.raw}`);
-      if (!inferred.some((tag) => tag.type === 'nature') && !isTask(event)) {
-        inferred.push(ensureTag('trifle', 'nature', '零碎但值得记录的小事'));
+      const inferred = materializeAiTags(enrichment.tags);
+      if (inferred.length) {
+        mergeTagsIntoEvent(event, inferred, new Date().toISOString());
       }
 
-      mergeTagsIntoEvent(event, inferred, new Date().toISOString());
       queueFriendJobs(event);
       job.status = 'done';
       return;
@@ -936,25 +869,78 @@ function executeJob(job: PendingAiJob): void {
     if (job.type === 'friend_comment') {
       const event = getEventById(String(job.payload.event_id));
       const friendId = String(job.payload.friend_id);
-      const comment = String(job.payload.comment);
-      const attitude = Number(job.payload.attitude);
+      const phase = String(job.payload.phase ?? 'deliver');
 
-      if (!event || event.comments.some((item) => item.sender === friendId && item.content === comment)) {
+      if (phase === 'generate') {
+        const friend = state.friends.find((item) => item.id === friendId);
+        if (!event || !friend || !friend.enabled) {
+          job.status = 'done';
+          return;
+        }
+
+        const candidate = await aiService.generateFriendComment({
+          model: getFriendModel(friend),
+          event: cloneEvent(event),
+          friend: { ...friend },
+          isTask: isTask(event),
+          taskState: taskStateOf(event),
+        });
+        const delayMinutes = Math.round((friend.latency + candidate.attitude * (1 - candidate.attitude)) * 60);
+        const scaledDelay = Math.max(
+          600,
+          Math.round(Math.max(1, delayMinutes) * DEMO_DELAY_UNIT_MS * (1.2 - clamp(friend.active, 0, 1) * 0.4)),
+        );
+        queueJob({
+          id: randomId('job'),
+          type: 'friend_comment',
+          status: 'pending',
+          run_at: new Date(Date.now() + scaledDelay).toISOString(),
+          retries: 0,
+          payload: {
+            phase: 'deliver',
+            event_id: event.id,
+            friend_id: friend.id,
+            attitude: candidate.attitude,
+            comment: candidate.comment,
+          },
+        });
         job.status = 'done';
         return;
       }
 
-      addComment(event.id, comment, friendId, attitude);
+      const comment = String(job.payload.comment ?? '').trim();
+      const attitude = Number(job.payload.attitude);
+
+      if (!event || !comment || event.comments.some((item) => item.sender === friendId && item.content === comment)) {
+        job.status = 'done';
+        return;
+      }
+
+      addComment(event.id, comment, friendId, Number.isFinite(attitude) ? attitude : undefined);
       job.status = 'done';
       return;
     }
 
     if (job.type === 'summary') {
-      buildSummary(
+      await buildSummary(
         job.payload.interval as SummaryInterval,
         String(job.payload.range_end),
         Boolean(job.payload.force),
       );
+      job.status = 'done';
+      return;
+    }
+
+    if (job.type === 'arrange_tags') {
+      const drafts = await aiService.arrangeTags({
+        model: getPrimaryModel(),
+        recentEvents: sortedEvents.value.slice(0, 50).map(cloneEvent),
+        existingTags: state.tags.filter((tag) => !tag.system).map(cloneTag),
+      });
+      const created = materializeAiTags(drafts);
+      if (created.length) {
+        replaceReactiveArray(state.tags, mergeTagCatalog(state.tags, created, new Date().toISOString()));
+      }
       job.status = 'done';
       return;
     }
@@ -971,15 +957,15 @@ function executeJob(job: PendingAiJob): void {
   }
 }
 
-function runDueAiJobs(): void {
+async function runDueAiJobs(): Promise<void> {
   const now = Date.now();
   const dueJobs = state.ai_jobs
     .filter((job) => job.status === 'pending' && new Date(job.run_at).getTime() <= now)
     .sort((left, right) => new Date(left.run_at).getTime() - new Date(right.run_at).getTime());
 
-  dueJobs.forEach((job) => {
-    executeJob(job);
-  });
+  for (const job of dueJobs) {
+    await executeJob(job);
+  }
 
   state.ai_jobs = state.ai_jobs
     .filter((job) => job.status === 'pending' || job.status === 'failed')
@@ -1007,7 +993,9 @@ function scheduleAiPump(): void {
     return;
   }
 
-  aiTimer = window.setTimeout(runDueAiJobs, Math.max(16, nextRun - Date.now()));
+  aiTimer = window.setTimeout(() => {
+    void runDueAiJobs();
+  }, Math.max(16, nextRun - Date.now()));
 }
 
 async function buildAssetExportList(): Promise<AppStateAssetExport[]> {
@@ -1124,16 +1112,7 @@ function removeModel(id: string): void {
 }
 
 function addFriend(): void {
-  state.friends.push({
-    id: randomId('friend'),
-    name: 'New Friend',
-    model_id: state.models[0]?.id ?? 'model_local_mock',
-    soul: '一个等待补充性格设定的朋友。',
-    system_prompt: '你是用户的陪伴型朋友。',
-    active: 0.7,
-    latency: 0.35,
-    enabled: true,
-  });
+  state.friends.push(createDefaultFriendDraft(state.models[0]?.id ?? 'your-model-id', randomId('friend')));
 }
 
 function removeFriend(id: string): void {

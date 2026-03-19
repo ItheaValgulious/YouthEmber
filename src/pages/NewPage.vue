@@ -17,25 +17,19 @@
         <ion-card class="sketch-card">
           <ion-card-header>
             <ion-card-title>创建 Event</ion-card-title>
-            <ion-card-subtitle>移动端优先：媒体、定位与存储都走 Capacitor 服务层。</ion-card-subtitle>
           </ion-card-header>
           <ion-card-content class="card-stack">
-            <label>
-              <div class="section-title">标题</div>
-              <input v-model="title" class="native-input" placeholder="可选：先写一个标题" />
-            </label>
-
             <label>
               <div class="section-title">正文</div>
               <textarea
                 v-model="raw"
                 class="native-textarea"
-                placeholder="记录今天发生了什么，支持只发一句话。"
+                placeholder="记录今天发生了什么。"
               />
             </label>
 
             <div class="card-stack">
-              <div class="section-title">能力入口</div>
+              <div class="section-title">工具</div>
               <div class="row wrap">
                 <ion-button fill="outline" :disabled="working" @click="takePhoto">
                   <ion-icon slot="start" :icon="cameraOutline" />
@@ -47,11 +41,11 @@
                 </ion-button>
                 <ion-button fill="outline" :disabled="working" @click="fileInput?.click()">
                   <ion-icon slot="start" :icon="folderOpenOutline" />
-                  文件上传
+                  文件
                 </ion-button>
-                <ion-button fill="outline" :disabled="working" @click="attachLocation">
-                  <ion-icon slot="start" :icon="locateOutline" />
-                  获取定位
+                <ion-button fill="outline" :disabled="working" @click="openTagsWindow">
+                  <ion-icon slot="start" :icon="pricetagOutline" />
+                  标签
                 </ion-button>
               </div>
 
@@ -63,10 +57,17 @@
                 type="file"
                 @change="handleUpload"
               />
+            </div>
 
-              <div v-if="currentLocation" class="empty-note">
-                已附带位置：{{ currentLocation.label }}
-                <span v-if="currentLocation.accuracy_meters != null">（精度约 {{ Math.round(currentLocation.accuracy_meters) }}m）</span>
+            <div v-if="hasSelectedSummary" class="card-stack">
+              <div class="section-title">已选标签</div>
+              <div class="tag-row">
+                <span v-for="tag in selectedTags" :key="`${tag.type}:${tag.label}`" class="tag-chip is-selected">
+                  {{ tag.label }}
+                </span>
+                <span v-if="includeLocation" class="tag-chip is-selected">
+                  {{ currentLocation?.label || '当前位置' }}
+                </span>
               </div>
             </div>
 
@@ -74,7 +75,7 @@
               <div v-for="asset in assets" :key="asset.id" class="preview-card">
                 <img v-if="asset.type === 'image'" :src="asset.display_path || asset.filepath" alt="preview" />
                 <video v-else-if="asset.type === 'video'" :src="asset.display_path || asset.filepath" muted />
-                <div v-else class="preview-meta">🎵 {{ asset.mime_type || 'audio' }}</div>
+                <div v-else class="preview-meta">音频</div>
                 <div class="preview-meta card-stack">
                   <div class="row between">
                     <span>{{ asset.type }}</span>
@@ -86,42 +87,31 @@
             </div>
           </ion-card-content>
         </ion-card>
-
-        <ion-card class="sketch-card">
-          <ion-card-header>
-            <ion-card-title>
-              <ion-icon :icon="pricetagOutline" style="vertical-align: middle; margin-right: 6px;" />
-              Tags
-            </ion-card-title>
-          </ion-card-header>
-          <ion-card-content>
-            <div class="tag-row">
-              <button
-                v-for="tag in userTags"
-                :key="`${tag.type}-${tag.label}`"
-                class="tag-chip"
-                :class="{ 'is-selected': selectedTagKeys.includes(`${tag.type}:${tag.label}`) }"
-                @click="toggleTag(tag.type, tag.label)"
-              >
-                {{ tag.label }}
-              </button>
-            </div>
-          </ion-card-content>
-        </ion-card>
       </div>
     </ion-content>
+
+    <TagsWindow
+      :open="tagsWindowOpen"
+      mode="create"
+      :tags="userTags"
+      :selected-keys="selectedTagKeys"
+      :location-enabled="includeLocation"
+      :current-location-label="currentLocation?.label || ''"
+      @cancel="tagsWindowOpen = false"
+      @apply="applyTags"
+    />
   </ion-page>
 </template>
 
 <script setup lang="ts">
 import { computed, ref } from 'vue';
+import { useRouter } from 'vue-router';
 import {
   IonButton,
   IonButtons,
   IonCard,
   IonCardContent,
   IonCardHeader,
-  IonCardSubtitle,
   IonCardTitle,
   IonContent,
   IonHeader,
@@ -134,38 +124,34 @@ import {
   cameraOutline,
   folderOpenOutline,
   imagesOutline,
-  locateOutline,
   pricetagOutline,
   sendOutline,
 } from 'ionicons/icons';
 
+import TagsWindow from '../components/TagsWindow.vue';
 import { cameraService, fileService, locationService } from '../services';
 import { useAppStore } from '../store/app-store';
-import type { AssetRecord, TagType } from '../types/models';
+import type { AssetRecord } from '../types/models';
 
+const router = useRouter();
 const store = useAppStore();
 
-const title = ref('');
 const raw = ref('');
 const selectedTagKeys = ref<string[]>([]);
 const assets = ref<AssetRecord[]>([]);
 const currentLocation = ref<Awaited<ReturnType<typeof locationService.getCurrentLocation>> | null>(null);
+const includeLocation = ref(true);
 const working = ref(false);
 const submitting = ref(false);
+const tagsWindowOpen = ref(false);
 
 const fileInput = ref<HTMLInputElement | null>(null);
 
 const userTags = computed(() => store.availableTags.value.filter((tag) => !tag.system));
-
-function toggleTag(type: TagType, label: string): void {
-  const key = `${type}:${label}`;
-  if (selectedTagKeys.value.includes(key)) {
-    selectedTagKeys.value = selectedTagKeys.value.filter((item) => item !== key);
-    return;
-  }
-
-  selectedTagKeys.value = [...selectedTagKeys.value, key];
-}
+const selectedTags = computed(() =>
+  userTags.value.filter((tag) => selectedTagKeys.value.includes(`${tag.type}:${tag.label}`)),
+);
+const hasSelectedSummary = computed(() => selectedTags.value.length > 0 || (includeLocation.value && !!currentLocation.value));
 
 function normalizeOrders(nextAssets: AssetRecord[]): AssetRecord[] {
   return nextAssets.map((asset, index) => ({
@@ -188,6 +174,31 @@ function formatSize(size: number): string {
   }
 
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+async function ensureCurrentLocation(): Promise<void> {
+  if (currentLocation.value) {
+    return;
+  }
+
+  try {
+    currentLocation.value = await locationService.getCurrentLocation();
+  } catch {
+    currentLocation.value = null;
+  }
+}
+
+async function openTagsWindow(): Promise<void> {
+  tagsWindowOpen.value = true;
+  if (includeLocation.value) {
+    await ensureCurrentLocation();
+  }
+}
+
+function applyTags(payload: { selectedKeys: string[]; locationEnabled: boolean }): void {
+  selectedTagKeys.value = payload.selectedKeys;
+  includeLocation.value = payload.locationEnabled;
+  tagsWindowOpen.value = false;
 }
 
 async function takePhoto(): Promise<void> {
@@ -235,17 +246,6 @@ async function handleUpload(domEvent: Event): Promise<void> {
   }
 }
 
-async function attachLocation(): Promise<void> {
-  working.value = true;
-  try {
-    currentLocation.value = await locationService.getCurrentLocation();
-  } catch (error) {
-    window.alert(error instanceof Error ? error.message : '获取定位失败');
-  } finally {
-    working.value = false;
-  }
-}
-
 function removeAsset(id: string): void {
   const target = assets.value.find((asset) => asset.id === id);
   assets.value = normalizeOrders(assets.value.filter((asset) => asset.id !== id));
@@ -256,30 +256,36 @@ function removeAsset(id: string): void {
 }
 
 async function submit(): Promise<void> {
-  if (!title.value.trim() && !raw.value.trim() && !assets.value.length) {
-    window.alert('至少填写一点内容，或者附带一个资源。');
+  if (!raw.value.trim() && !assets.value.length) {
+    window.alert('至少写一点内容，或者附带一项媒体。');
     return;
   }
 
   submitting.value = true;
   try {
+    if (includeLocation.value) {
+      await ensureCurrentLocation();
+    }
+
     const tags = userTags.value.filter((tag) => selectedTagKeys.value.includes(`${tag.type}:${tag.label}`));
-    if (currentLocation.value) {
+    if (includeLocation.value && currentLocation.value) {
       tags.push(locationService.buildLocationTag(currentLocation.value));
     }
 
     store.createEvent({
-      title: title.value,
+      title: '',
       raw: raw.value,
       tags,
       assets: assets.value,
     });
 
-    title.value = '';
     raw.value = '';
     assets.value = [];
     selectedTagKeys.value = [];
     currentLocation.value = null;
+    includeLocation.value = true;
+
+    await router.push('/tabs/flow');
   } finally {
     submitting.value = false;
   }

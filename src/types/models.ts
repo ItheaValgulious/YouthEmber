@@ -2,7 +2,7 @@ export type TagType = 'nature' | 'mood' | 'others' | 'people' | 'location';
 export type AssetType = 'image' | 'video' | 'audio';
 export type SummaryInterval = '7d' | '3m' | '1y';
 export type MyPanel = 'mailbox' | 'diary' | 'setting' | 'data';
-export type AiJobType = 'enrich_event' | 'friend_comment' | 'summary';
+export type AiJobType = 'enrich_event' | 'friend_comment' | 'summary' | 'arrange_tags';
 export type AiJobStatus = 'pending' | 'done' | 'failed';
 
 export interface LocationPayload {
