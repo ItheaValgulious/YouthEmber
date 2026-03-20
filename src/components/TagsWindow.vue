@@ -130,10 +130,12 @@ const props = withDefaults(
     selectedKeys: string[];
     locationEnabled?: boolean;
     currentLocationLabel?: string;
+    defaultLocationPayload?: LocationPayload | null;
   }>(),
   {
     locationEnabled: true,
     currentLocationLabel: '',
+    defaultLocationPayload: null,
   },
 );
 
@@ -173,11 +175,11 @@ function tagKey(tag: Pick<Tag, 'type' | 'label'>): string {
 function resetLocalState(): void {
   localSelectedKeys.value = [...props.selectedKeys];
   localLocationEnabled.value = props.locationEnabled;
-  activeCategory.value = visibleCategories.value[0] ?? 'nature';
-  locationFilter.country = '';
-  locationFilter.province = '';
-  locationFilter.city = '';
-  locationFilter.district = '';
+  activeCategory.value = props.mode === 'filter' ? 'location' : visibleCategories.value[0] ?? 'nature';
+  locationFilter.country = props.defaultLocationPayload?.country ?? '';
+  locationFilter.province = props.defaultLocationPayload?.province ?? '';
+  locationFilter.city = props.defaultLocationPayload?.city ?? '';
+  locationFilter.district = props.defaultLocationPayload?.district ?? '';
 }
 
 watch(
@@ -336,21 +338,30 @@ function apply(): void {
 .tags-window__body {
   display: grid;
   gap: 12px;
+  grid-template-columns: 108px minmax(0, 1fr);
 }
 
 .tags-window__categories {
   display: flex;
+  flex-direction: column;
   gap: 8px;
-  overflow-x: auto;
+  overflow-y: auto;
 }
 
 .tags-window__category {
   white-space: nowrap;
+  text-align: left;
 }
 
 .tags-window__filter-grid {
   display: grid;
   gap: 10px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (max-width: 640px) {
+  .tags-window__body {
+    grid-template-columns: 88px minmax(0, 1fr);
+  }
 }
 </style>

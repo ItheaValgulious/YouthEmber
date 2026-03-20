@@ -65,26 +65,41 @@
               <ion-card-title>Diary</ion-card-title>
             </ion-card-header>
             <ion-card-content class="card-stack">
-              <div v-for="group in store.diaryGroups.value" :key="group.date" class="preview-card" style="padding: 12px;">
-                <div class="section-title">{{ group.date }}</div>
-                <div class="card-stack">
-                  <div
-                    v-for="event in group.events"
-                    :key="event.id"
-                    style="padding: 10px 12px; border-radius: 14px; background: rgba(255,255,255,0.6); border: 1px solid #ddc4a0;"
-                  >
-                    <strong>{{ event.title || '未命名记录' }}</strong>
-                    <div class="muted" style="margin-top: 4px;">
-                      {{ store.formatDateTime(store.effectiveTimeOf(event)) }}
+              <div v-for="(page, pageIndex) in store.diaryPages.value" :key="`page-${pageIndex}`" class="diary-page">
+                <div class="diary-page__number">Page {{ pageIndex + 1 }}</div>
+                <div v-for="group in page" :key="group.date" class="preview-card diary-page__day">
+                  <div class="section-title">{{ group.date }}</div>
+                  <div class="card-stack">
+                    <div
+                      v-for="event in group.events"
+                      :key="event.id"
+                      style="padding: 10px 12px; border-radius: 14px; background: rgba(255,255,255,0.6); border: 1px solid #ddc4a0;"
+                    >
+                      <strong>{{ event.title || '未命名记录' }}</strong>
+                      <div class="muted" style="margin-top: 4px;">
+                        {{ store.formatDateTime(store.effectiveTimeOf(event)) }}
+                      </div>
+                      <div style="margin-top: 8px; line-height: 1.6; white-space: pre-wrap;">
+                        {{ event.raw || '（无正文）' }}
+                      </div>
                     </div>
-                    <div style="margin-top: 8px; line-height: 1.6; white-space: pre-wrap;">
-                      {{ event.raw || '（无正文）' }}
+
+                    <div
+                      v-for="summary in group.summaries"
+                      :key="summary.id"
+                      style="padding: 12px; border-radius: 14px; background: rgba(246,230,195,0.56); border: 1px dashed #ba9360;"
+                    >
+                      <div class="section-title" style="margin-bottom: 6px;">{{ summary.interval }} summary</div>
+                      <strong>{{ summary.title }}</strong>
+                      <div style="margin-top: 8px; line-height: 1.6;">
+                        {{ summary.summary }}
+                      </div>
                     </div>
                   </div>
                 </div>
               </div>
 
-              <div v-if="!store.diaryGroups.value.length" class="empty-note">
+              <div v-if="!store.diaryPages.value.length" class="empty-note">
                 Diary 还没有内容。
               </div>
             </ion-card-content>
@@ -110,16 +125,16 @@
             </ion-card-header>
             <ion-card-content class="card-stack">
               <label>
-                <div class="section-title">Timezone</div>
-                <input v-model="store.state.config.timezone" class="native-input" />
-              </label>
-              <label>
                 <div class="section-title">Pre Alert</div>
                 <input v-model.number="store.state.config.pre_alert" class="native-input" min="0" step="1" type="number" />
               </label>
               <label>
                 <div class="section-title">Alert Time</div>
                 <input v-model="store.state.config.alert_time" class="native-input" type="time" />
+              </label>
+              <label>
+                <div class="section-title">Token</div>
+                <input v-model="store.state.token" class="native-input" placeholder="future sync token" />
               </label>
             </ion-card-content>
           </ion-card>
@@ -537,3 +552,24 @@ async function handleImport(domEvent: Event): Promise<void> {
   }
 }
 </script>
+
+<style scoped>
+.diary-page {
+  padding: 16px;
+  border-radius: 20px;
+  background: rgba(255, 250, 240, 0.88);
+  border: 2px solid rgba(95, 73, 48, 0.22);
+  box-shadow: 6px 6px 0 rgba(95, 73, 48, 0.1);
+}
+
+.diary-page__number {
+  text-align: right;
+  color: #8a6a45;
+  font-size: 12px;
+  margin-bottom: 12px;
+}
+
+.diary-page__day {
+  padding: 12px;
+}
+</style>

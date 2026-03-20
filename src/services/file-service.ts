@@ -111,6 +111,74 @@ async function readImageSize(dataUrl: string): Promise<Pick<AssetRecord, 'width'
   });
 }
 
+async function readAudioDuration(dataUrl: string): Promise<number | undefined> {
+  return new Promise((resolve) => {
+    const audio = document.createElement('audio');
+    audio.preload = 'metadata';
+    audio.onloadedmetadata = () => resolve(Number.isFinite(audio.duration) ? Math.round(audio.duration * 1000) : undefined);
+    audio.onerror = () => resolve(undefined);
+    audio.src = dataUrl;
+  });
+}
+
+async function readVideoMetadata(dataUrl: string): Promise<Pick<AssetRecord, 'width' | 'height' | 'duration_ms' | 'thumbnail_path'>> {
+  return new Promise((resolve) => {
+    const video = document.createElement('video');
+    video.preload = 'metadata';
+    video.muted = true;
+    video.playsInline = true;
+
+    const finish = (payload: Pick<AssetRecord, 'width' | 'height' | 'duration_ms' | 'thumbnail_path'>) => {
+      video.pause();
+      resolve(payload);
+    };
+
+    const captureFrame = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = video.videoWidth || 320;
+        canvas.height = video.videoHeight || 180;
+        const context = canvas.getContext('2d');
+        if (!context) {
+          finish({
+            width: video.videoWidth || undefined,
+            height: video.videoHeight || undefined,
+            duration_ms: Number.isFinite(video.duration) ? Math.round(video.duration * 1000) : undefined,
+          });
+          return;
+        }
+
+        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+        finish({
+          width: video.videoWidth || undefined,
+          height: video.videoHeight || undefined,
+          duration_ms: Number.isFinite(video.duration) ? Math.round(video.duration * 1000) : undefined,
+          thumbnail_path: canvas.toDataURL('image/jpeg', 0.82),
+        });
+      } catch {
+        finish({
+          width: video.videoWidth || undefined,
+          height: video.videoHeight || undefined,
+          duration_ms: Number.isFinite(video.duration) ? Math.round(video.duration * 1000) : undefined,
+        });
+      }
+    };
+
+    video.onloadedmetadata = () => {
+      if (!Number.isFinite(video.duration) || video.duration <= 0) {
+        captureFrame();
+        return;
+      }
+
+      const targetTime = Math.min(1, Math.max(video.duration * 0.15, 0.05));
+      video.currentTime = Math.min(targetTime, Math.max(video.duration - 0.05, 0));
+    };
+    video.onseeked = captureFrame;
+    video.onerror = () => finish({});
+    video.src = dataUrl;
+  });
+}
+
 export class FileService {
   async saveFiles(files: Iterable<File>, hint?: AssetType, uploadOrderStart = 0): Promise<AssetRecord[]> {
     const list = [...files];
@@ -188,14 +256,33 @@ export class FileService {
   }
 
   async hydrateAsset(asset: AssetRecord): Promise<AssetRecord> {
+    let thumbnailPath = asset.thumbnail_path;
+    if (
+      thumbnailPath &&
+      !thumbnailPath.startsWith('data:') &&
+      !thumbnailPath.startsWith('http') &&
+      !thumbnailPath.startsWith('blob:')
+    ) {
+      try {
+        const { uri } = await Filesystem.getUri({
+          path: thumbnailPath,
+          directory: Directory.Data,
+        });
+        thumbnailPath = isNativePlatform() ? toWebViewPath(uri) : thumbnailPath;
+      } catch {
+        thumbnailPath = asset.thumbnail_path;
+      }
+    }
+
     if (asset.display_path?.startsWith('data:') || asset.display_path?.startsWith('http')) {
-      return { ...asset };
+      return { ...asset, thumbnail_path: thumbnailPath };
     }
 
     if (asset.uri) {
       return {
         ...asset,
         display_path: isNativePlatform() ? toWebViewPath(asset.uri) : asset.display_path ?? asset.filepath,
+        thumbnail_path: thumbnailPath,
       };
     }
 
@@ -203,6 +290,7 @@ export class FileService {
       return {
         ...asset,
         display_path: asset.display_path ?? asset.filepath,
+        thumbnail_path: thumbnailPath,
       };
     }
 
@@ -216,11 +304,13 @@ export class FileService {
         ...asset,
         uri,
         display_path: isNativePlatform() ? toWebViewPath(uri) : asset.display_path ?? asset.filepath,
+        thumbnail_path: thumbnailPath,
       };
     } catch {
       return {
         ...asset,
         display_path: asset.display_path ?? asset.filepath,
+        thumbnail_path: thumbnailPath,
       };
     }
   }
@@ -304,6 +394,19 @@ export class FileService {
     };
   }
 
+  private async persistDataUrl(dataUrl: string, folder: string, filename: string): Promise<string> {
+    const { base64 } = parseDataUrl(dataUrl);
+    const path = `${folder}/${Date.now()}-${sanitizeFilename(filename)}`;
+    await Filesystem.writeFile({
+      path,
+      directory: Directory.Data,
+      data: base64,
+      recursive: true,
+    });
+
+    return path;
+  }
+
   private async persistBinary(base64: string, options: PersistBinaryOptions): Promise<AssetRecord> {
     const safeName = ensureExtension(
       sanitizeFilename(options.filename ?? `${options.assetType}-${Date.now()}`),
@@ -331,6 +434,24 @@ export class FileService {
 
     if (options.assetType === 'image' && options.previewDataUrl) {
       Object.assign(record, await readImageSize(options.previewDataUrl));
+    }
+
+    if (options.assetType === 'audio' && options.previewDataUrl) {
+      record.duration_ms = await readAudioDuration(options.previewDataUrl);
+    }
+
+    if (options.assetType === 'video' && options.previewDataUrl) {
+      const metadata = await readVideoMetadata(options.previewDataUrl);
+      record.width = metadata.width;
+      record.height = metadata.height;
+      record.duration_ms = metadata.duration_ms;
+      if (metadata.thumbnail_path?.startsWith('data:')) {
+        record.thumbnail_path = await this.persistDataUrl(
+          metadata.thumbnail_path,
+          'assets/video-thumbnails',
+          `${safeName.replace(/\.[A-Za-z0-9]+$/, '')}.jpg`,
+        );
+      }
     }
 
     return record;

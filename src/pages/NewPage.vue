@@ -22,13 +22,15 @@
             <label>
               <div class="section-title">正文</div>
               <textarea
+                ref="rawInput"
                 v-model="raw"
                 class="native-textarea"
                 placeholder="记录今天发生了什么。"
+                @input="resizeTextarea"
               />
             </label>
 
-            <div class="card-stack">
+            <div class="card-stack new-toolbar">
               <div class="section-title">工具</div>
               <div class="row wrap">
                 <ion-button fill="outline" :disabled="working" @click="takePhoto">
@@ -74,12 +76,18 @@
             <div v-if="assets.length" class="preview-grid">
               <div v-for="asset in assets" :key="asset.id" class="preview-card">
                 <img v-if="asset.type === 'image'" :src="asset.display_path || asset.filepath" alt="preview" />
-                <video v-else-if="asset.type === 'video'" :src="asset.display_path || asset.filepath" muted />
+                <video
+                  v-else-if="asset.type === 'video'"
+                  :poster="asset.thumbnail_path"
+                  :src="asset.display_path || asset.filepath"
+                  muted
+                />
                 <div v-else class="preview-meta">音频</div>
                 <div class="preview-meta card-stack">
                   <div class="row between">
                     <span>{{ asset.type }}</span>
-                    <span v-if="asset.size_bytes">{{ formatSize(asset.size_bytes) }}</span>
+                    <span v-if="asset.duration_ms">{{ Math.round(asset.duration_ms / 1000) }}s</span>
+                    <span v-else-if="asset.size_bytes">{{ formatSize(asset.size_bytes) }}</span>
                   </div>
                   <button class="tag-chip" @click="removeAsset(asset.id)">移除</button>
                 </div>
@@ -104,7 +112,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import {
   IonButton,
@@ -144,6 +152,7 @@ const includeLocation = ref(true);
 const working = ref(false);
 const submitting = ref(false);
 const tagsWindowOpen = ref(false);
+const rawInput = ref<HTMLTextAreaElement | null>(null);
 
 const fileInput = ref<HTMLInputElement | null>(null);
 
@@ -175,6 +184,31 @@ function formatSize(size: number): string {
 
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
+
+function resizeTextarea(): void {
+  const element = rawInput.value;
+  if (!element) {
+    return;
+  }
+
+  element.style.height = '0px';
+  element.style.height = `${Math.max(118, element.scrollHeight)}px`;
+}
+
+onMounted(async () => {
+  const primedAssets = store.consumeComposerAssets();
+  if (primedAssets.length) {
+    appendAssets(primedAssets);
+  }
+
+  await nextTick();
+  resizeTextarea();
+});
+
+watch(raw, async () => {
+  await nextTick();
+  resizeTextarea();
+});
 
 async function ensureCurrentLocation(): Promise<void> {
   if (currentLocation.value) {
@@ -291,3 +325,21 @@ async function submit(): Promise<void> {
   }
 }
 </script>
+
+<style scoped>
+.new-toolbar {
+  position: sticky;
+  top: 76px;
+  z-index: 4;
+  padding: 12px;
+  border-radius: 18px;
+  background: rgba(255, 251, 244, 0.92);
+  border: 1px solid rgba(180, 139, 89, 0.28);
+  backdrop-filter: blur(10px);
+}
+
+.native-textarea {
+  resize: none;
+  overflow: hidden;
+}
+</style>

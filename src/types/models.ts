@@ -83,6 +83,31 @@ export interface SummaryMeta {
   range_end: string;
 }
 
+export interface SummaryRecord {
+  id: string;
+  created_at: string;
+  interval: SummaryInterval;
+  range_start: string;
+  range_end: string;
+  tasks: {
+    finished: number;
+    failed: number;
+    rest: number;
+    rate: number;
+    summary: string;
+  };
+  mood: {
+    event_track: Array<{ time: string; value: number }>;
+    daily_totals: Array<{ date: string; total: number }>;
+    monthly_averages: Array<{ month: string; average: number }>;
+    total: number;
+    summary: string;
+  };
+  summary: string;
+  title: string;
+  mail_id: string;
+}
+
 export interface MailRecord {
   id: string;
   time: string;
@@ -118,11 +143,13 @@ export interface AppConfig {
 export interface AppState {
   schema_version: number;
   config: AppConfig;
+  token: string;
   models: ModelRecord[];
   friends: FriendRecord[];
   tags: Tag[];
   events: EventRecord[];
   mails: MailRecord[];
+  summaries: SummaryRecord[];
   ai_jobs: PendingAiJob[];
   last_summary_check: string | null;
   last_opened_my_panel: MyPanel;

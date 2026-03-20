@@ -7,10 +7,10 @@ import {
   createDefaultModels,
   createDefaultTags,
 } from '../config/defaults';
-import { addDays, compareIsoDesc, diffDays, formatDateTime, toDateKey } from '../lib/date';
+import { addDays, compareIsoDesc, diffDays, endOfDay, formatDateTime, toDateKey } from '../lib/date';
 import { buildDiaryHtml, buildMailBundleHtml, buildSummaryMailHtml } from '../lib/exporters';
 import { dedupeTags, hasTagLabel, mergeTagCatalog, normalizeLabel, sortTagsForDisplay } from '../lib/tag';
-import { aiService, databaseService, fileService } from '../services';
+import { aiService, databaseService, fileService, notificationService } from '../services';
 import type { AiTagDraft } from '../services/ai-service';
 import type {
   AppState,
@@ -25,6 +25,7 @@ import type {
   MyPanel,
   PendingAiJob,
   SummaryInterval,
+  SummaryRecord,
   Tag,
   TagType,
 } from '../types/models';
@@ -44,9 +45,12 @@ const SUMMARY_LABELS: Record<SummaryInterval, string> = {
 };
 
 let aiTimer: number | null = null;
+let taskDeadlineTimer: number | null = null;
+let summaryCheckTimer: number | null = null;
 let bootstrapped = false;
 let persistTimer: number | null = null;
 let persistChain = Promise.resolve();
+let primedComposerAssets: AssetRecord[] = [];
 
 function randomId(prefix: string): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
@@ -130,6 +134,33 @@ function normalizeJob(raw: Partial<PendingAiJob>): PendingAiJob {
   };
 }
 
+function normalizeSummary(raw: Partial<SummaryRecord>): SummaryRecord {
+  return {
+    id: raw.id ?? randomId('summary'),
+    created_at: raw.created_at ?? new Date().toISOString(),
+    interval: raw.interval ?? '7d',
+    range_start: raw.range_start ?? new Date().toISOString(),
+    range_end: raw.range_end ?? new Date().toISOString(),
+    tasks: {
+      finished: raw.tasks?.finished ?? 0,
+      failed: raw.tasks?.failed ?? 0,
+      rest: raw.tasks?.rest ?? 0,
+      rate: raw.tasks?.rate ?? 0,
+      summary: raw.tasks?.summary ?? '',
+    },
+    mood: {
+      event_track: raw.mood?.event_track ?? [],
+      daily_totals: raw.mood?.daily_totals ?? [],
+      monthly_averages: raw.mood?.monthly_averages ?? [],
+      total: raw.mood?.total ?? 0,
+      summary: raw.mood?.summary ?? '',
+    },
+    summary: raw.summary ?? '',
+    title: raw.title ?? 'Summary',
+    mail_id: raw.mail_id ?? '',
+  };
+}
+
 function effectiveTimeOf(event: EventRecord): string {
   return event.time ?? event.created_at;
 }
@@ -152,6 +183,31 @@ function isFailedTask(event: EventRecord): boolean {
 
 function isOngoingTask(event: EventRecord): boolean {
   return isTask(event) && hasTagLabel(event.tags, 'ongoing') && !isFinishedTask(event) && !isFailedTask(event);
+}
+
+function taskDeadlineAt(event: EventRecord): Date | null {
+  if (!isOngoingTask(event) || !event.time) {
+    return null;
+  }
+
+  return endOfDay(event.time);
+}
+
+async function syncTaskNotification(event: EventRecord): Promise<void> {
+  if (isOngoingTask(event) && event.time) {
+    await notificationService.scheduleTaskNotifications(event, state.config);
+    return;
+  }
+
+  await notificationService.cancelTaskNotifications(event.id);
+}
+
+async function syncAllTaskNotifications(): Promise<void> {
+  for (const event of state.events) {
+    if (isTask(event)) {
+      await syncTaskNotification(event);
+    }
+  }
 }
 
 function makeWelcomeMail(): MailRecord {
@@ -209,11 +265,13 @@ function createInitialState(): AppState {
   return {
     schema_version: 1,
     config: createDefaultConfig(),
+    token: '',
     models: createDefaultModels(),
     friends: createDefaultFriends(),
     tags,
     events: [introTask, introEvent],
     mails: [makeWelcomeMail()],
+    summaries: [],
     ai_jobs: [],
     last_summary_check: null,
     last_opened_my_panel: 'mailbox',
@@ -245,12 +303,14 @@ function normalizeState(raw: Partial<AppState> | undefined): AppState {
   return {
     schema_version: 1,
     config,
+    token: raw.token ?? '',
     models: Array.isArray(raw.models) && raw.models.length ? raw.models.map((item) => ({ ...item })) : seed.models,
     friends:
       Array.isArray(raw.friends) && raw.friends.length ? raw.friends.map((item) => ({ ...item })) : seed.friends,
     tags,
     events: Array.isArray(raw.events) && raw.events.length ? raw.events.map(normalizeEvent) : seed.events,
     mails: Array.isArray(raw.mails) && raw.mails.length ? raw.mails.map(normalizeMail) : seed.mails,
+    summaries: Array.isArray(raw.summaries) ? raw.summaries.map(normalizeSummary) : [],
     ai_jobs: Array.isArray(raw.ai_jobs) ? raw.ai_jobs.map(normalizeJob) : [],
     last_summary_check: raw.last_summary_check ?? null,
     last_opened_my_panel: raw.last_opened_my_panel ?? 'mailbox',
@@ -310,11 +370,27 @@ watch(
   { deep: true },
 );
 
+watch(
+  () => [state.config.pre_alert, state.config.alert_time],
+  () => {
+    if (!bootstrapped) {
+      return;
+    }
+
+    void syncAllTaskNotifications();
+    scheduleTaskDeadlinePump();
+  },
+);
+
 const sortedEvents = computed(() => [...state.events].sort(compareEventsDesc));
 
 const ongoingTasks = computed(() => sortedEvents.value.filter((event) => isOngoingTask(event)));
 
 const sortedMails = computed(() => [...state.mails].sort((left, right) => compareIsoDesc(left.time, right.time)));
+
+const sortedSummaries = computed(() =>
+  [...state.summaries].sort((left, right) => compareIsoDesc(left.range_end, right.range_end)),
+);
 
 const availableTags = computed(() =>
   sortTagsForDisplay(
@@ -330,6 +406,7 @@ const availableTags = computed(() =>
 
 const diaryGroups = computed(() => {
   const grouped = new Map<string, EventRecord[]>();
+  const groupedSummaries = new Map<string, SummaryRecord[]>();
 
   sortedEvents.value.forEach((event) => {
     const key = toDateKey(effectiveTimeOf(event));
@@ -338,7 +415,48 @@ const diaryGroups = computed(() => {
     grouped.set(key, items);
   });
 
-  return [...grouped.entries()].map(([date, events]) => ({ date, events }));
+  sortedSummaries.value.forEach((summary) => {
+    const key = toDateKey(summary.range_end);
+    const items = groupedSummaries.get(key) ?? [];
+    items.push(summary);
+    groupedSummaries.set(key, items);
+  });
+
+  return [...grouped.entries()].map(([date, events]) => ({
+    date,
+    events,
+    summaries: groupedSummaries.get(date) ?? [],
+  }));
+});
+
+const diaryPages = computed(() => {
+  const pages: Array<typeof diaryGroups.value> = [];
+  const margin = state.config.page_margin;
+  const pageBudget = Math.max(7, Math.floor((760 - margin * 2) / 72));
+  let currentPage: typeof diaryGroups.value = [];
+  let currentUnits = 0;
+
+  diaryGroups.value.forEach((group) => {
+    const units =
+      1 +
+      group.events.reduce((sum, event) => sum + 1 + Math.ceil((event.raw.length || 40) / 180), 0) +
+      group.summaries.length * 2;
+
+    if (currentPage.length && currentUnits + units > pageBudget) {
+      pages.push(currentPage);
+      currentPage = [];
+      currentUnits = 0;
+    }
+
+    currentPage.push(group);
+    currentUnits += units;
+  });
+
+  if (currentPage.length) {
+    pages.push(currentPage);
+  }
+
+  return pages;
 });
 
 function replaceReactiveArray<T>(target: T[], next: T[]): void {
@@ -348,11 +466,13 @@ function replaceReactiveArray<T>(target: T[], next: T[]): void {
 function replaceState(next: AppState): void {
   state.schema_version = next.schema_version;
   Object.assign(state.config, next.config);
+  state.token = next.token;
   replaceReactiveArray(state.models, next.models.map((item) => ({ ...item })));
   replaceReactiveArray(state.friends, next.friends.map((item) => ({ ...item })));
   replaceReactiveArray(state.tags, next.tags.map(cloneTag));
   replaceReactiveArray(state.events, next.events.map(cloneEvent));
   replaceReactiveArray(state.mails, next.mails.map(normalizeMail));
+  replaceReactiveArray(state.summaries, next.summaries.map(normalizeSummary));
   replaceReactiveArray(state.ai_jobs, next.ai_jobs.map(normalizeJob));
   state.last_summary_check = next.last_summary_check;
   state.last_opened_my_panel = next.last_opened_my_panel;
@@ -555,14 +675,13 @@ function arrangeTagsIfNeeded(): void {
   });
 }
 
-function queueSummary(interval: SummaryInterval, force = false): void {
-  const today = new Date().toISOString();
+function queueSummary(interval: SummaryInterval, rangeEnd: string, force = false): void {
   const exists = state.ai_jobs.some(
     (job) =>
       job.type === 'summary' &&
       job.status === 'pending' &&
       job.payload.interval === interval &&
-      job.payload.range_end === toDateKey(today),
+      job.payload.range_end === rangeEnd,
   );
 
   if (exists) {
@@ -577,10 +696,38 @@ function queueSummary(interval: SummaryInterval, force = false): void {
     retries: 0,
     payload: {
       interval,
-      range_end: today,
+      range_end: rangeEnd,
       force,
     },
   });
+}
+
+function shouldGenerateSummary(interval: SummaryInterval, rangeEnd: Date): boolean {
+  const earliest = sortedEvents.value.at(-1);
+  if (!earliest) {
+    return false;
+  }
+
+  const depth = diffDays(earliest.created_at, rangeEnd) + 1;
+  const windowSize = SUMMARY_WINDOWS[interval];
+  return depth >= windowSize && depth % windowSize === 0;
+}
+
+function scheduleSummaryCheckPump(): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  if (summaryCheckTimer) {
+    window.clearTimeout(summaryCheckTimer);
+    summaryCheckTimer = null;
+  }
+
+  const nextCheck = endOfDay(new Date()).getTime() + 1000;
+  summaryCheckTimer = window.setTimeout(() => {
+    ensureDailySummaries();
+    scheduleSummaryCheckPump();
+  }, Math.max(1000, nextCheck - Date.now()));
 }
 
 function ensureDailySummaries(force = false): void {
@@ -589,19 +736,62 @@ function ensureDailySummaries(force = false): void {
     return;
   }
 
-  state.last_summary_check = todayKey;
+  const earliest = sortedEvents.value.at(-1);
+  if (!earliest) {
+    state.last_summary_check = todayKey;
+    return;
+  }
 
-  state.config.summary_intervals.forEach((interval) => {
-    const earliest = sortedEvents.value.at(-1);
-    if (!force && earliest) {
-      const depth = diffDays(earliest.created_at, new Date());
-      if (depth + 1 < SUMMARY_WINDOWS[interval]) {
-        return;
+  let cursor = state.last_summary_check ? addDays(state.last_summary_check, 1) : new Date(earliest.created_at);
+  while (toDateKey(cursor) <= todayKey) {
+    state.config.summary_intervals.forEach((interval) => {
+      if (shouldGenerateSummary(interval, cursor)) {
+        queueSummary(interval, new Date(cursor).toISOString(), force);
       }
-    }
+    });
 
-    queueSummary(interval, force);
+    cursor = addDays(cursor, 1);
+  }
+
+  state.last_summary_check = todayKey;
+}
+
+function scheduleTaskDeadlinePump(): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  if (taskDeadlineTimer) {
+    window.clearTimeout(taskDeadlineTimer);
+    taskDeadlineTimer = null;
+  }
+
+  const nextDeadline = state.events
+    .map((event) => taskDeadlineAt(event)?.getTime() ?? null)
+    .filter((value): value is number => typeof value === 'number')
+    .sort((left, right) => left - right)[0];
+
+  if (!nextDeadline) {
+    return;
+  }
+
+  taskDeadlineTimer = window.setTimeout(() => {
+    runDueTaskFailures();
+  }, Math.max(1000, nextDeadline - Date.now() + 32));
+}
+
+function runDueTaskFailures(): void {
+  const now = Date.now();
+  const expired = state.events.filter((event) => {
+    const deadline = taskDeadlineAt(event);
+    return deadline ? deadline.getTime() <= now : false;
   });
+
+  expired.forEach((event) => {
+    failTask(event.id);
+  });
+
+  scheduleTaskDeadlinePump();
 }
 
 function createEvent(payload: { title: string; raw: string; tags: Tag[]; assets: AssetRecord[] }): EventRecord {
@@ -653,6 +843,8 @@ function createTaskFromText(text: string, dueAt: string | null): EventRecord | n
   };
 
   state.events.push(event);
+  void syncTaskNotification(event);
+  scheduleTaskDeadlinePump();
   queueEventEnrichment(event.id);
   arrangeTagsIfNeeded();
   ensureDailySummaries();
@@ -674,6 +866,21 @@ function addComment(eventId: string, content: string, sender = 'user', attitude?
   };
 
   event.comments.push(comment);
+
+  if (sender === 'user') {
+    queueFriendJobs(event);
+  }
+}
+
+function updateTaskDueTime(eventId: string, dueAt: string | null): void {
+  const event = getEventById(eventId);
+  if (!event || !isOngoingTask(event)) {
+    return;
+  }
+
+  event.time = dueAt;
+  void syncTaskNotification(event);
+  scheduleTaskDeadlinePump();
 }
 
 function swapTaskState(event: EventRecord, nextTag: 'finished' | 'not_finished'): void {
@@ -687,8 +894,10 @@ function completeTask(eventId: string): void {
     return;
   }
 
+  void notificationService.cancelTaskNotifications(event.id);
   event.time = new Date().toISOString();
   swapTaskState(event, 'finished');
+  scheduleTaskDeadlinePump();
   queueFriendJobs(event);
 }
 
@@ -698,8 +907,10 @@ function failTask(eventId: string): void {
     return;
   }
 
+  void notificationService.cancelTaskNotifications(event.id);
   event.time = new Date().toISOString();
   swapTaskState(event, 'not_finished');
+  scheduleTaskDeadlinePump();
   queueFriendJobs(event);
 }
 
@@ -714,8 +925,9 @@ async function buildSummary(interval: SummaryInterval, rangeEnd: string, force: 
   const existingIndex = state.mails.findIndex(
     (mail) => mail.summary_meta && summaryMetaKey(mail.summary_meta.interval, mail.summary_meta.range_end) === metaKey,
   );
+  const existingSummaryIndex = state.summaries.findIndex((summary) => summaryMetaKey(summary.interval, summary.range_end) === metaKey);
 
-  if (existingIndex >= 0 && !force) {
+  if (existingIndex >= 0 && existingSummaryIndex >= 0 && !force) {
     return;
   }
 
@@ -726,7 +938,11 @@ async function buildSummary(interval: SummaryInterval, rangeEnd: string, force: 
     const eventTime = new Date(effectiveTimeOf(event)).getTime();
 
     if (isTask(event)) {
-      return createdTime <= endTime && (createdTime >= startTime || eventTime >= startTime);
+      if (isOngoingTask(event)) {
+        return createdTime <= endTime;
+      }
+
+      return createdTime <= endTime && eventTime >= startTime && eventTime <= endTime;
     }
 
     return eventTime >= startTime && eventTime <= endTime;
@@ -760,6 +976,17 @@ async function buildSummary(interval: SummaryInterval, rangeEnd: string, force: 
       totals.set(key, Number(((totals.get(key) ?? 0) + moodScoreOf(event)).toFixed(2)));
       return totals;
     }, new Map<string, number>());
+  const monthlyBuckets = [...dailyTotals.entries()].reduce<Map<string, number[]>>((buckets, [date, totalValue]) => {
+    const monthKey = date.slice(0, 7);
+    const items = buckets.get(monthKey) ?? [];
+    items.push(totalValue);
+    buckets.set(monthKey, items);
+    return buckets;
+  }, new Map<string, number[]>());
+  const monthlyAverages = [...monthlyBuckets.entries()].map(([month, totals]) => ({
+    month,
+    average: Number((totals.reduce((sum, value) => sum + value, 0) / totals.length).toFixed(2)),
+  }));
 
   const toTaskSamples = (items: EventRecord[]): Array<{ title: string; time: string | null }> =>
     items
@@ -810,7 +1037,7 @@ async function buildSummary(interval: SummaryInterval, rangeEnd: string, force: 
   const dateLabel = toDateKey(endDate);
   const title = `${summaryCopy.title} · ${dateLabel}`;
   const mail: MailRecord = {
-    id: randomId('mail'),
+    id: existingIndex >= 0 ? state.mails[existingIndex].id : randomId('mail'),
     time: new Date().toISOString(),
     title,
     sender: 'AshDiary AI',
@@ -830,11 +1057,44 @@ async function buildSummary(interval: SummaryInterval, rangeEnd: string, force: 
       range_end: endDate.toISOString(),
     },
   };
+  const summaryRecord: SummaryRecord = {
+    id: existingSummaryIndex >= 0 ? state.summaries[existingSummaryIndex].id : randomId('summary'),
+    created_at: new Date().toISOString(),
+    interval,
+    range_start: startDate.toISOString(),
+    range_end: endDate.toISOString(),
+    tasks: {
+      finished,
+      failed,
+      rest,
+      rate,
+      summary: summaryCopy.task_summary,
+    },
+    mood: {
+      event_track: moodTrackBase.map(([time, value]) => ({ time, value })),
+      daily_totals: [...dailyTotals.entries()].map(([date, totalValue]) => ({
+        date,
+        total: totalValue,
+      })),
+      monthly_averages: monthlyAverages,
+      total: Number(moodTotal.toFixed(2)),
+      summary: summaryCopy.mood_summary,
+    },
+    summary: summaryCopy.overall_summary,
+    title: summaryCopy.title,
+    mail_id: mail.id,
+  };
 
-  if (existingIndex >= 0 && !force) {
+  if (existingIndex >= 0) {
     state.mails.splice(existingIndex, 1, mail);
   } else {
     state.mails.push(mail);
+  }
+
+  if (existingSummaryIndex >= 0) {
+    state.summaries.splice(existingSummaryIndex, 1, summaryRecord);
+  } else {
+    state.summaries.push(summaryRecord);
   }
 }
 
@@ -887,6 +1147,11 @@ async function executeJob(job: PendingAiJob): Promise<void> {
           isTask: isTask(event),
           taskState: taskStateOf(event),
         });
+        const probability = clamp(friend.active * candidate.attitude, 0, 1);
+        if (Math.random() > probability) {
+          job.status = 'done';
+          return;
+        }
         const delayMinutes = Math.round((friend.latency + candidate.attitude * (1 - candidate.attitude)) * 60);
         const scaledDelay = Math.max(
           600,
@@ -1059,27 +1324,38 @@ async function importJsonSnapshot(text: string): Promise<void> {
   }
 
   replaceState(next);
+  runDueTaskFailures();
+  await syncAllTaskNotifications();
   scheduleAiPump();
   ensureDailySummaries(true);
+  scheduleTaskDeadlinePump();
+  scheduleSummaryCheckPump();
   schedulePersist();
 }
 
 async function exportDiaryHtml(): Promise<void> {
   const groups = await Promise.all(
-    diaryGroups.value.map(async (group) => ({
-      date: group.date,
-      events: await Promise.all(
-        group.events.map(async (event) => ({
-          ...cloneEvent(event),
-          assets: await Promise.all(
-            event.assets.map(async (asset) => ({
-              ...asset,
-              display_path: await fileService.readAssetAsDataUrl(asset),
+    diaryPages.value.map(async (page) =>
+      Promise.all(
+        page.map(async (group) => ({
+          date: group.date,
+          events: await Promise.all(
+            group.events.map(async (event) => ({
+              ...cloneEvent(event),
+              assets: await Promise.all(
+                event.assets.map(async (asset) => ({
+                  ...asset,
+                  display_path: await fileService.readAssetAsDataUrl(asset),
+                })),
+              ),
             })),
           ),
+          summaries: group.summaries.map((summary) => ({
+            ...normalizeSummary(summary),
+          })),
         })),
       ),
-    })),
+    ),
   );
 
   await fileService.exportTextFile(
@@ -1096,6 +1372,17 @@ async function exportMailsHtml(): Promise<void> {
     'text/html;charset=utf-8',
   );
 }
+
+function primeComposerAssets(assets: AssetRecord[]): void {
+  primedComposerAssets = assets.map((asset) => ({ ...asset }));
+}
+
+function consumeComposerAssets(): AssetRecord[] {
+  const assets = primedComposerAssets.map((asset) => ({ ...asset }));
+  primedComposerAssets = [];
+  return assets;
+}
+
 function addModel(): void {
   state.models.push({
     id: randomId('model'),
@@ -1126,7 +1413,7 @@ function selectMyPanel(panel: MyPanel): void {
 }
 
 function regenerateSummary(interval: SummaryInterval): void {
-  queueSummary(interval, true);
+  queueSummary(interval, new Date().toISOString(), true);
 }
 
 export async function initializeAppStore(): Promise<void> {
@@ -1155,8 +1442,12 @@ export async function initializeAppStore(): Promise<void> {
     localStorage.removeItem(LEGACY_STORAGE_KEY);
     await databaseService.saveAppState(snapshotState());
   }
+  runDueTaskFailures();
+  await syncAllTaskNotifications();
   ensureDailySummaries();
   scheduleAiPump();
+  scheduleTaskDeadlinePump();
+  scheduleSummaryCheckPump();
 }
 
 export function useAppStore(): {
@@ -1164,11 +1455,14 @@ export function useAppStore(): {
   sortedEvents: typeof sortedEvents;
   ongoingTasks: typeof ongoingTasks;
   sortedMails: typeof sortedMails;
+  sortedSummaries: typeof sortedSummaries;
   diaryGroups: typeof diaryGroups;
+  diaryPages: typeof diaryPages;
   availableTags: typeof availableTags;
   createEvent: typeof createEvent;
   createTaskFromText: typeof createTaskFromText;
   addComment: typeof addComment;
+  updateTaskDueTime: typeof updateTaskDueTime;
   completeTask: typeof completeTask;
   failTask: typeof failTask;
   getEventById: typeof getEventById;
@@ -1191,17 +1485,22 @@ export function useAppStore(): {
   importJsonSnapshot: typeof importJsonSnapshot;
   exportDiaryHtml: typeof exportDiaryHtml;
   exportMailsHtml: typeof exportMailsHtml;
+  primeComposerAssets: typeof primeComposerAssets;
+  consumeComposerAssets: typeof consumeComposerAssets;
 } {
   return {
     state,
     sortedEvents,
     ongoingTasks,
     sortedMails,
+    sortedSummaries,
     diaryGroups,
+    diaryPages,
     availableTags,
     createEvent,
     createTaskFromText,
     addComment,
+    updateTaskDueTime,
     completeTask,
     failTask,
     getEventById,
@@ -1224,6 +1523,8 @@ export function useAppStore(): {
     importJsonSnapshot,
     exportDiaryHtml,
     exportMailsHtml,
+    primeComposerAssets,
+    consumeComposerAssets,
   };
 }
 

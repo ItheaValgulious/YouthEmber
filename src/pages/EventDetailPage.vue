@@ -32,12 +32,26 @@
             <div v-if="event.assets.length" class="preview-grid">
               <div v-for="asset in event.assets" :key="asset.id" class="preview-card">
                 <img v-if="asset.type === 'image'" :src="asset.display_path || asset.filepath" alt="asset" />
-                <video v-else-if="asset.type === 'video'" :src="asset.display_path || asset.filepath" controls />
-                <div v-else class="preview-meta">🎵 {{ asset.mime_type || 'audio' }}</div>
+                <video
+                  v-else-if="asset.type === 'video'"
+                  :poster="asset.thumbnail_path"
+                  :src="asset.display_path || asset.filepath"
+                  controls
+                />
+                <div v-else class="preview-meta">🎵 {{ asset.mime_type || 'audio' }}<br />{{ asset.duration_ms ? `${Math.round(asset.duration_ms / 1000)}s` : '' }}</div>
                 <div class="preview-meta">
                   {{ asset.filename || asset.type }}
                 </div>
               </div>
+            </div>
+
+            <div v-if="store.isOngoingTask(event)" class="row wrap">
+              <label style="flex: 1 1 240px;">
+                <div class="section-title">截止时间</div>
+                <input v-model="taskDueDraft" class="native-input" type="datetime-local" />
+              </label>
+              <ion-button fill="outline" @click="saveTaskDueTime">保存截止时间</ion-button>
+              <ion-button fill="clear" @click="clearTaskDueTime">清空截止时间</ion-button>
             </div>
 
             <div v-if="store.isOngoingTask(event)" class="row wrap">
@@ -104,6 +118,7 @@ import {
   IonToolbar,
 } from '@ionic/vue';
 
+import { fromDateTimeLocalValue, toDateTimeLocalValue } from '../lib/date';
 import { databaseService } from '../services';
 import { useAppStore } from '../store/app-store';
 
@@ -113,6 +128,7 @@ const route = useRoute();
 const store = useAppStore();
 const commentDraft = ref('');
 const commentOrder = ref<'desc' | 'asc'>('desc');
+const taskDueDraft = ref('');
 
 onMounted(async () => {
   const saved = await databaseService.getJson<'desc' | 'asc'>(COMMENT_SORT_KEY);
@@ -126,6 +142,15 @@ watch(commentOrder, (value) => {
 });
 
 const event = computed(() => store.getEventById(String(route.params.id)));
+
+watch(
+  event,
+  (value) => {
+    taskDueDraft.value = toDateTimeLocalValue(value?.time);
+  },
+  { immediate: true },
+);
+
 const orderedComments = computed(() => {
   const target = event.value;
   if (!target) {
@@ -148,5 +173,24 @@ function submitComment(): void {
 
   store.addComment(target.id, commentDraft.value);
   commentDraft.value = '';
+}
+
+function saveTaskDueTime(): void {
+  const target = event.value;
+  if (!target || !store.isOngoingTask(target)) {
+    return;
+  }
+
+  store.updateTaskDueTime(target.id, fromDateTimeLocalValue(taskDueDraft.value));
+}
+
+function clearTaskDueTime(): void {
+  const target = event.value;
+  if (!target || !store.isOngoingTask(target)) {
+    return;
+  }
+
+  taskDueDraft.value = '';
+  store.updateTaskDueTime(target.id, null);
 }
 </script>

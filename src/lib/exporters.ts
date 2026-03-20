@@ -1,5 +1,5 @@
 import { formatDateTime, toDateKey } from './date';
-import type { EventRecord, MailRecord } from '../types/models';
+import type { EventRecord, MailRecord, SummaryRecord } from '../types/models';
 
 export interface SummaryMailPayload {
   interval: string;
@@ -167,37 +167,68 @@ export function buildSummaryMailHtml(payload: SummaryMailPayload): string {
   `.trim();
 }
 
-export function buildDiaryHtml(groups: Array<{ date: string; events: EventRecord[] }>): string {
-  const sections = groups
-    .map((group) => {
-      const cards = group.events
-        .map((event) => {
-          const tags = event.tags.map((tag) => `<span class="tag">${escapeHtml(tag.label)}</span>`).join('');
-          const comments = event.comments
+export function buildDiaryHtml(
+  pages: Array<Array<{ date: string; events: EventRecord[]; summaries: SummaryRecord[] }>>,
+): string {
+  const sections = pages
+    .map((page, pageIndex) => {
+      const days = page
+        .map((group) => {
+          const cards = group.events
+            .map((event) => {
+              const tags = event.tags.map((tag) => `<span class="tag">${escapeHtml(tag.label)}</span>`).join('');
+              const assets = event.assets
+                .filter((asset) => asset.type === 'image' && asset.display_path)
+                .map((asset) => `<img class="asset" src="${escapeHtml(asset.display_path || asset.filepath)}" alt="${escapeHtml(asset.filename || asset.type)}" />`)
+                .join('');
+              const comments = event.comments
+                .map(
+                  (comment) =>
+                    `<li><strong>${escapeHtml(comment.sender)}</strong> · ${escapeHtml(formatDateTime(comment.time))}<br />${escapeHtml(comment.content)}</li>`,
+                )
+                .join('');
+
+              return `
+                <article class="event">
+                  <header>
+                    <h3>${escapeHtml(event.title || '未命名记录')}</h3>
+                    <div class="meta">${escapeHtml(formatDateTime(event.time ?? event.created_at))}</div>
+                  </header>
+                  <div class="tags">${tags}</div>
+                  <pre>${escapeHtml(event.raw || '（无正文）')}</pre>
+                  ${assets ? `<div class="asset-row">${assets}</div>` : ''}
+                  ${comments ? `<ul class="comments">${comments}</ul>` : ''}
+                </article>
+              `;
+            })
+            .join('');
+
+          const summaries = group.summaries
             .map(
-              (comment) =>
-                `<li><strong>${escapeHtml(comment.sender)}</strong> · ${escapeHtml(formatDateTime(comment.time))}<br />${escapeHtml(comment.content)}</li>`,
+              (summary) => `
+                <article class="summary">
+                  <div class="summary-head">${escapeHtml(summary.interval)} summary</div>
+                  <h3>${escapeHtml(summary.title)}</h3>
+                  <p>${escapeHtml(summary.summary)}</p>
+                </article>
+              `,
             )
             .join('');
 
           return `
-            <article class="event">
-              <header>
-                <h3>${escapeHtml(event.title || '未命名记录')}</h3>
-                <div class="meta">${escapeHtml(formatDateTime(event.time ?? event.created_at))}</div>
-              </header>
-              <div class="tags">${tags}</div>
-              <pre>${escapeHtml(event.raw || '（无正文）')}</pre>
-              ${comments ? `<ul class="comments">${comments}</ul>` : ''}
-            </article>
+            <section class="day">
+              <h2>${escapeHtml(group.date)}</h2>
+              ${cards}
+              ${summaries}
+            </section>
           `;
         })
         .join('');
 
       return `
-        <section class="day">
-          <h2>${escapeHtml(group.date)}</h2>
-          ${cards}
+        <section class="page">
+          <div class="page-number">Page ${pageIndex + 1}</div>
+          ${days}
         </section>
       `;
     })
@@ -212,14 +243,20 @@ export function buildDiaryHtml(groups: Array<{ date: string; events: EventRecord
     <title>AshDiary Diary Export</title>
     <style>
       body { margin: 0; padding: 24px; background: #efe4cc; color: #2d2115; font-family: "Segoe UI", system-ui, sans-serif; }
-      .day { margin: 0 auto 24px; max-width: 760px; }
+      .page { margin: 0 auto 28px; max-width: 760px; min-height: calc(100vh - 48px); padding: 24px; background: #fffaf0; border: 2px solid #5f4930; border-radius: 22px; box-shadow: 8px 8px 0 rgba(95, 73, 48, 0.14); page-break-after: always; }
+      .page-number { text-align: right; color: #8a6a45; font-size: 12px; margin-bottom: 12px; }
+      .day { margin: 0 auto 24px; max-width: 100%; }
       h2 { margin-bottom: 14px; }
       .event { background: #fffaf0; border: 2px solid #5f4930; border-radius: 18px; padding: 18px; box-shadow: 4px 4px 0 rgba(95, 73, 48, 0.16); margin-bottom: 14px; }
+      .summary { background: rgba(246, 230, 195, 0.6); border: 1px dashed #b48b59; border-radius: 18px; padding: 16px; margin-bottom: 14px; }
+      .summary-head { font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: #8a6a45; }
       .meta { color: #7b6447; font-size: 13px; margin-top: 4px; }
       .tags { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
       .tag { display: inline-block; border-radius: 999px; padding: 4px 10px; background: #f5e3bc; border: 1px solid #b69058; }
       pre { margin: 0; white-space: pre-wrap; font: inherit; line-height: 1.7; }
       .comments { margin-top: 14px; padding-left: 18px; line-height: 1.7; }
+      .asset-row { display: flex; gap: 10px; overflow: hidden; margin-top: 12px; }
+      .asset { width: 112px; height: 112px; object-fit: cover; border-radius: 14px; border: 1px solid #d2b289; background: #fff; }
     </style>
   </head>
   <body>
@@ -263,4 +300,3 @@ export function buildMailBundleHtml(mails: MailRecord[]): string {
 </html>
   `.trim();
 }
-
