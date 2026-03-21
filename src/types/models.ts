@@ -46,6 +46,7 @@ export interface CommentRecord {
   sender: string;
   time: string;
   attitude?: number;
+  reply_to_comment_id?: string;
 }
 
 export interface EventRecord {
@@ -63,9 +64,11 @@ export interface FriendRecord {
   id: string;
   name: string;
   model_id: string;
+  memory_path: string;
   soul: string;
   system_prompt: string;
   active: number;
+  ai_active: number;
   latency: number;
   enabled: boolean;
 }
@@ -75,6 +78,7 @@ export interface ModelRecord {
   name: string;
   base_url: string;
   api_key: string;
+  img_dealing: boolean;
 }
 
 export interface SummaryMeta {
@@ -163,9 +167,16 @@ export interface AppStateAssetExport {
   data_url: string;
 }
 
+export interface AppStateFriendMemoryExport {
+  friend_id: string;
+  memory_path: string;
+  content: string;
+}
+
 export interface AppStateExportBundle {
   schema_version: number;
   exported_at: string;
   data: AppState;
   assets?: AppStateAssetExport[];
+  friend_memories?: AppStateFriendMemoryExport[];
 }

@@ -62,7 +62,7 @@ export function buildSummaryMailHtml(payload: SummaryMailPayload): string {
   </head>
   <body>
     <article class="mail">
-      <div class="eyebrow">AshDiary Summary</div>
+      <div class="eyebrow">Ember Summary</div>
       <h1>${escapeHtml(payload.interval)} 回顾</h1>
       <div class="range">${escapeHtml(payload.rangeLabel)}</div>
 
@@ -240,7 +240,7 @@ export function buildDiaryHtml(
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>AshDiary Diary Export</title>
+    <title>Ember Diary Export</title>
     <style>
       body { margin: 0; padding: 24px; background: #efe4cc; color: #2d2115; font-family: "Segoe UI", system-ui, sans-serif; }
       .page { margin: 0 auto 28px; max-width: 760px; min-height: calc(100vh - 48px); padding: 24px; background: #fffaf0; border: 2px solid #5f4930; border-radius: 22px; box-shadow: 8px 8px 0 rgba(95, 73, 48, 0.14); page-break-after: always; }
@@ -285,7 +285,7 @@ export function buildMailBundleHtml(mails: MailRecord[]): string {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>AshDiary Mail Export</title>
+    <title>Ember Mail Export</title>
     <style>
       body { margin: 0; padding: 24px; background: #efe4cc; color: #2d2115; font-family: "Segoe UI", system-ui, sans-serif; }
       .mail { margin: 0 auto 24px; max-width: 860px; background: #fffaf0; border: 2px solid #5f4930; border-radius: 18px; padding: 18px; box-shadow: 4px 4px 0 rgba(95, 73, 48, 0.16); }
@@ -294,7 +294,7 @@ export function buildMailBundleHtml(mails: MailRecord[]): string {
     </style>
   </head>
   <body>
-    <h1>${escapeHtml(`AshDiary Mail Export · ${toDateKey(new Date())}`)}</h1>
+    <h1>${escapeHtml(`Ember Mail Export · ${toDateKey(new Date())}`)}</h1>
     ${sections || '<p>暂无可导出的 Mail 内容。</p>'}
   </body>
 </html>

@@ -148,7 +148,7 @@
             </ion-card-header>
             <ion-card-content class="card-stack">
               <div class="empty-note">
-                标题、tag、Summary、tag arrange 默认使用列表中的首个可用模型；`id` 会直接作为请求里的 model 标识。
+                标题、tag、summary、tag arrange 默认使用列表中的首个可用模型。`model.id` 会直接作为请求里的模型标识。
               </div>
 
               <div
@@ -186,6 +186,10 @@
                     @input="updateModelField(index, 'api_key', readText($event))"
                     @blur="commitModel(index)"
                   />
+                  <label class="row between">
+                    <strong>img_dealing</strong>
+                    <input :checked="model.img_dealing" type="checkbox" @change="updateModelImageDealing(index, $event)" />
+                  </label>
                   <ion-button color="danger" fill="clear" size="small" @click="handleRemoveModel(index)">
                     删除
                   </ion-button>
@@ -236,6 +240,7 @@
                       {{ model.name }} · {{ model.id }}
                     </option>
                   </select>
+                  <div class="muted">memory file: {{ friend.memory_path }}</div>
                   <textarea
                     :value="friend.soul"
                     class="native-textarea"
@@ -260,6 +265,19 @@
                       step="0.05"
                       type="number"
                       @input="updateFriendNumber(index, 'active', $event)"
+                      @blur="commitFriend(index)"
+                    />
+                  </label>
+                  <label>
+                    <div class="section-title">ai_active</div>
+                    <input
+                      :value="friend.ai_active"
+                      class="native-input"
+                      max="1"
+                      min="0"
+                      step="0.05"
+                      type="number"
+                      @input="updateFriendNumber(index, 'ai_active', $event)"
                       @blur="commitFriend(index)"
                     />
                   </label>
@@ -298,7 +316,7 @@
               <input ref="importInput" hidden accept="application/json" type="file" @change="handleImport" />
 
               <div class="empty-note">
-                当前本地共有 {{ store.sortedEvents.value.length }} 条 Event、{{ store.sortedMails.value.length }} 封 Mail。
+                当前本地共有 {{ store.sortedEvents.value.length }} 条 Event，{{ store.sortedMails.value.length }} 封 Mail。
               </div>
             </ion-card-content>
           </ion-card>
@@ -392,7 +410,7 @@ watch(
 
 const platformLabel = computed(() => {
   const platform = getCapacitorPlatform();
-  return isNativePlatform() ? `${platform}（Native）` : `${platform}（Web fallback）`;
+  return isNativePlatform() ? `${platform} (Native)` : `${platform} (Web fallback)`;
 });
 
 function readText(event: Event): string {
@@ -410,13 +428,23 @@ function readNumber(event: Event): number {
   return Number.isFinite(value) ? value : 0;
 }
 
-function updateModelField(index: number, field: keyof ModelRecord, value: string): void {
+function updateModelField(index: number, field: 'name' | 'id' | 'base_url' | 'api_key', value: string): void {
   const draft = modelDrafts.value[index];
   if (!draft) {
     return;
   }
 
   draft[field] = value;
+}
+
+function updateModelImageDealing(index: number, event: Event): void {
+  const draft = modelDrafts.value[index];
+  if (!draft) {
+    return;
+  }
+
+  draft.img_dealing = readChecked(event);
+  commitModel(index);
 }
 
 function commitModel(index: number): void {
@@ -430,6 +458,7 @@ function commitModel(index: number): void {
   target.id = draft.id.trim();
   target.base_url = draft.base_url.trim();
   target.api_key = draft.api_key.trim();
+  target.img_dealing = draft.img_dealing;
 }
 
 function updateFriendField(index: number, field: 'name' | 'id' | 'soul' | 'system_prompt', value: string): void {
@@ -441,7 +470,7 @@ function updateFriendField(index: number, field: 'name' | 'id' | 'soul' | 'syste
   draft[field] = value;
 }
 
-function updateFriendNumber(index: number, field: 'active' | 'latency', event: Event): void {
+function updateFriendNumber(index: number, field: 'active' | 'ai_active' | 'latency', event: Event): void {
   const draft = friendDrafts.value[index];
   if (!draft) {
     return;
@@ -484,6 +513,7 @@ function commitFriend(index: number): void {
   target.soul = draft.soul.trim();
   target.system_prompt = draft.system_prompt.trim();
   target.active = draft.active;
+  target.ai_active = draft.ai_active;
   target.latency = draft.latency;
 }
 

@@ -1,5 +1,5 @@
 import { Capacitor } from '@capacitor/core';
-import { Directory, Filesystem } from '@capacitor/filesystem';
+import { Directory, Encoding, Filesystem } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import type { GalleryPhoto, Photo } from '@capacitor/camera';
 
@@ -336,6 +336,38 @@ export class FileService {
     return `data:${asset.mime_type ?? 'application/octet-stream'};base64,${result.data}`;
   }
 
+  async readTextFile(path: string): Promise<string | null> {
+    if (!path.trim()) {
+      return null;
+    }
+
+    try {
+      const result = await Filesystem.readFile({
+        path,
+        directory: Directory.Data,
+        encoding: Encoding.UTF8,
+      });
+
+      if (typeof result.data === 'string') {
+        return result.data;
+      }
+
+      return await result.data.text();
+    } catch {
+      return null;
+    }
+  }
+
+  async writeTextFile(path: string, content: string): Promise<void> {
+    await Filesystem.writeFile({
+      path,
+      directory: Directory.Data,
+      data: content,
+      encoding: Encoding.UTF8,
+      recursive: true,
+    });
+  }
+
   async removeAsset(asset: AssetRecord): Promise<void> {
     if (!asset.filepath || asset.filepath.startsWith('data:') || asset.filepath.startsWith('blob:')) {
       return;
@@ -344,6 +376,21 @@ export class FileService {
     try {
       await Filesystem.deleteFile({
         path: asset.filepath,
+        directory: Directory.Data,
+      });
+    } catch {
+      // ignore if already deleted
+    }
+  }
+
+  async removeFile(path: string): Promise<void> {
+    if (!path.trim()) {
+      return;
+    }
+
+    try {
+      await Filesystem.deleteFile({
+        path,
         directory: Directory.Data,
       });
     } catch {

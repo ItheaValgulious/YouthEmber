@@ -1,4 +1,4 @@
-# AshDiary v0.1
+# Ember v0.1
 
 基于 `plan/v1` 文档实现的第一版可运行软件原型。
 

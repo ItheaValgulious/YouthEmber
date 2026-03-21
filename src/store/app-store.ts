@@ -1,6 +1,8 @@
 ﻿import { computed, reactive, watch } from 'vue';
 
 import {
+  DEFAULT_FRIEND_AI_ACTIVE,
+  buildFriendMemoryPath,
   createDefaultConfig,
   createDefaultFriendDraft,
   createDefaultFriends,
@@ -16,6 +18,7 @@ import type {
   AppState,
   AppStateAssetExport,
   AppStateExportBundle,
+  AppStateFriendMemoryExport,
   AssetRecord,
   CommentRecord,
   EventRecord,
@@ -33,6 +36,7 @@ import type {
 const LEGACY_STORAGE_KEY = 'ashdairy.state.v1';
 const RETRY_DELAYS = [60_000, 5 * 60_000, 10 * 60_000];
 const DEMO_DELAY_UNIT_MS = 120;
+const FRIEND_MEMORY_MAX_CHARS = 100_000;
 const SUMMARY_WINDOWS: Record<SummaryInterval, number> = {
   '7d': 7,
   '3m': 90,
@@ -51,6 +55,13 @@ let bootstrapped = false;
 let persistTimer: number | null = null;
 let persistChain = Promise.resolve();
 let primedComposerAssets: AssetRecord[] = [];
+const imageSummaryCache = new Map<string, Promise<string>>();
+
+interface FriendCommentTrigger {
+  kind: 'event' | 'comment';
+  commentId?: string;
+  sender?: string;
+}
 
 function randomId(prefix: string): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
@@ -80,6 +91,12 @@ function cloneEvent(event: EventRecord): EventRecord {
   };
 }
 
+function cloneModel(model: ModelRecord): ModelRecord {
+  return {
+    ...model,
+  };
+}
+
 function normalizeAsset(raw: Partial<AssetRecord>): AssetRecord {
   return {
     id: raw.id ?? randomId('asset'),
@@ -98,6 +115,54 @@ function normalizeAsset(raw: Partial<AssetRecord>): AssetRecord {
   };
 }
 
+function normalizeComment(raw: Partial<CommentRecord>): CommentRecord {
+  return {
+    id: raw.id ?? randomId('cmt'),
+    content: raw.content ?? '',
+    sender: raw.sender ?? 'user',
+    time: raw.time ?? new Date().toISOString(),
+    attitude: raw.attitude,
+    reply_to_comment_id:
+      typeof raw.reply_to_comment_id === 'string' && raw.reply_to_comment_id.trim()
+        ? raw.reply_to_comment_id.trim()
+        : undefined,
+  };
+}
+
+function normalizeModel(raw: Partial<ModelRecord>): ModelRecord {
+  return {
+    id: raw.id ?? randomId('model'),
+    name: raw.name ?? 'Model',
+    base_url: raw.base_url ?? '',
+    api_key: raw.api_key ?? '',
+    img_dealing: raw.img_dealing !== false,
+  };
+}
+
+function normalizeFriend(raw: Partial<FriendRecord>, fallbackModelId: string): FriendRecord {
+  const id = typeof raw.id === 'string' && raw.id.trim() ? raw.id.trim() : randomId('friend');
+  const seed = createDefaultFriendDraft(fallbackModelId, id);
+
+  return {
+    ...seed,
+    ...raw,
+    id,
+    name: typeof raw.name === 'string' ? raw.name : seed.name,
+    model_id: typeof raw.model_id === 'string' && raw.model_id.trim() ? raw.model_id.trim() : fallbackModelId,
+    memory_path:
+      typeof raw.memory_path === 'string' && raw.memory_path.trim() ? raw.memory_path.trim() : buildFriendMemoryPath(id),
+    soul: typeof raw.soul === 'string' ? raw.soul : seed.soul,
+    system_prompt: typeof raw.system_prompt === 'string' ? raw.system_prompt : seed.system_prompt,
+    active: typeof raw.active === 'number' && Number.isFinite(raw.active) ? raw.active : seed.active,
+    ai_active:
+      typeof raw.ai_active === 'number' && Number.isFinite(raw.ai_active)
+        ? raw.ai_active
+        : DEFAULT_FRIEND_AI_ACTIVE,
+    latency: typeof raw.latency === 'number' && Number.isFinite(raw.latency) ? raw.latency : seed.latency,
+    enabled: typeof raw.enabled === 'boolean' ? raw.enabled : seed.enabled,
+  };
+}
+
 function normalizeEvent(raw: Partial<EventRecord>): EventRecord {
   return {
     id: raw.id ?? randomId('evt'),
@@ -107,7 +172,7 @@ function normalizeEvent(raw: Partial<EventRecord>): EventRecord {
     raw: raw.raw ?? '',
     tags: Array.isArray(raw.tags) ? raw.tags.map(cloneTag) : [],
     assets: Array.isArray(raw.assets) ? raw.assets.map(normalizeAsset) : [],
-    comments: Array.isArray(raw.comments) ? raw.comments.map((comment) => ({ ...comment })) : [],
+    comments: Array.isArray(raw.comments) ? raw.comments.map(normalizeComment) : [],
   };
 }
 
@@ -116,7 +181,7 @@ function normalizeMail(raw: Partial<MailRecord>): MailRecord {
     id: raw.id ?? randomId('mail'),
     time: raw.time ?? new Date().toISOString(),
     title: raw.title ?? 'Untitled Mail',
-    sender: raw.sender ?? 'AshDiary AI',
+    sender: raw.sender ?? 'Ember AI',
     content: raw.content ?? '<p>Empty mail.</p>',
     summary_meta: raw.summary_meta,
   };
@@ -214,13 +279,13 @@ function makeWelcomeMail(): MailRecord {
   return {
     id: randomId('mail'),
     time: new Date().toISOString(),
-    title: '欢迎来到 AshDiary',
-    sender: 'AshDiary AI',
+    title: '欢迎来到 Ember',
+    sender: 'Ember AI',
     content: `
       <article style="padding:24px;font-family:'Segoe UI',sans-serif;background:#fffaf0;color:#2d2115">
-        <h1 style="margin-top:0">欢迎来到 AshDiary</h1>
-        <p>现在主流程已经接通真实 AI：记录 Event、创建 Task、生成 Friend 评论、生成 Summary Mail 都会走异步 AI 队列。</p>
-        <p>首次使用前，请先到 Setting 里配置至少一个可用的 Model。当前约定是：<code>model.id</code> 作为实际请求的远端模型标识，标题、tag、summary、tag arrange 默认使用列表中的首个可用模型。</p>
+        <h1 style="margin-top:0">欢迎来到 Ember</h1>
+        <p>我是 Ember。这里会慢慢装下你的 Event、Task、朋友评论和 Summary Mail。</p>
+        <p>开始前先到 Setting 里配置至少一个可用的 Model，配好之后就可以写下第一条记录了。</p>
       </article>
     `.trim(),
   };
@@ -229,34 +294,18 @@ function makeWelcomeMail(): MailRecord {
 function createInitialState(): AppState {
   const tags = createDefaultTags();
   const now = new Date();
-  const createdAt = addDays(now, -1).toISOString();
-  const dueAt = addDays(now, 1).toISOString();
+  const createdAt = now.toISOString();
 
   const introEvent: EventRecord = {
     id: randomId('evt'),
     created_at: createdAt,
     time: createdAt,
-    title: 'Capacitor 接入准备完成',
-    raw: '这条记录用于验证事件流、异步 AI 补全和本地持久化链路是否正常工作。',
+    title: '第一次遇见你',
+    raw: '你好，我是 Ember。今天是我第一次在这里遇见你，先把这一刻轻轻记下来。',
     tags: dedupeTags(
       tags
-        .filter((tag) => ['discovery', 'happy'].includes(normalizeLabel(tag.label)))
+        .filter((tag) => ['discovery'].includes(normalizeLabel(tag.label)))
         .map((tag) => ({ ...cloneTag(tag), last_used_at: createdAt })),
-    ),
-    assets: [],
-    comments: [],
-  };
-
-  const introTask: EventRecord = {
-    id: randomId('evt'),
-    created_at: now.toISOString(),
-    time: dueAt,
-    title: '试一条移动端任务流',
-    raw: '去 Tasks 页创建、完成或放弃一个任务，确认 task + ongoing / finished / not_finished 状态链路。',
-    tags: dedupeTags(
-      tags
-        .filter((tag) => ['task', 'ongoing', 'life'].includes(normalizeLabel(tag.label)))
-        .map((tag) => ({ ...cloneTag(tag), last_used_at: now.toISOString() })),
     ),
     assets: [],
     comments: [],
@@ -269,7 +318,7 @@ function createInitialState(): AppState {
     models: createDefaultModels(),
     friends: createDefaultFriends(),
     tags,
-    events: [introTask, introEvent],
+    events: [introEvent],
     mails: [makeWelcomeMail()],
     summaries: [],
     ai_jobs: [],
@@ -299,14 +348,20 @@ function normalizeState(raw: Partial<AppState> | undefined): AppState {
   };
 
   const tags = dedupeTags([...(raw.tags ?? []), ...seed.tags].map(cloneTag));
+  const models =
+    Array.isArray(raw.models) && raw.models.length ? raw.models.map((item) => normalizeModel(item)) : seed.models.map(cloneModel);
+  const fallbackModelId = models[0]?.id ?? seed.models[0]?.id ?? 'your-model-id';
+  const friends =
+    Array.isArray(raw.friends) && raw.friends.length
+      ? raw.friends.map((item) => normalizeFriend(item, fallbackModelId))
+      : seed.friends.map((item) => normalizeFriend(item, fallbackModelId));
 
   return {
     schema_version: 1,
     config,
     token: raw.token ?? '',
-    models: Array.isArray(raw.models) && raw.models.length ? raw.models.map((item) => ({ ...item })) : seed.models,
-    friends:
-      Array.isArray(raw.friends) && raw.friends.length ? raw.friends.map((item) => ({ ...item })) : seed.friends,
+    models,
+    friends,
     tags,
     events: Array.isArray(raw.events) && raw.events.length ? raw.events.map(normalizeEvent) : seed.events,
     mails: Array.isArray(raw.mails) && raw.mails.length ? raw.mails.map(normalizeMail) : seed.mails,
@@ -467,8 +522,11 @@ function replaceState(next: AppState): void {
   state.schema_version = next.schema_version;
   Object.assign(state.config, next.config);
   state.token = next.token;
-  replaceReactiveArray(state.models, next.models.map((item) => ({ ...item })));
-  replaceReactiveArray(state.friends, next.friends.map((item) => ({ ...item })));
+  replaceReactiveArray(state.models, next.models.map(cloneModel));
+  replaceReactiveArray(
+    state.friends,
+    next.friends.map((item) => normalizeFriend(item, next.models[0]?.id ?? 'your-model-id')),
+  );
   replaceReactiveArray(state.tags, next.tags.map(cloneTag));
   replaceReactiveArray(state.events, next.events.map(cloneEvent));
   replaceReactiveArray(state.mails, next.mails.map(normalizeMail));
@@ -545,6 +603,14 @@ function getMailById(id: string): MailRecord | undefined {
   return state.mails.find((mail) => mail.id === id);
 }
 
+function getCommentById(event: EventRecord, commentId: string | undefined): CommentRecord | undefined {
+  if (!commentId) {
+    return undefined;
+  }
+
+  return event.comments.find((comment) => comment.id === commentId);
+}
+
 function truncateText(value: string, maxLength: number): string {
   const clean = value.replace(/\s+/g, ' ').trim();
   if (clean.length <= maxLength) {
@@ -552,6 +618,68 @@ function truncateText(value: string, maxLength: number): string {
   }
 
   return `${clean.slice(0, maxLength)}…`;
+}
+
+function eventHasImageAssets(event: EventRecord): boolean {
+  return event.assets.some((asset) => asset.type === 'image');
+}
+
+function clampMemoryContent(content: string): string {
+  const normalized = content.replace(/\r\n/g, '\n').trim();
+  if (normalized.length <= FRIEND_MEMORY_MAX_CHARS) {
+    return normalized;
+  }
+
+  return normalized.slice(normalized.length - FRIEND_MEMORY_MAX_CHARS).trim();
+}
+
+async function readFriendMemory(friend: FriendRecord): Promise<string> {
+  const content = await fileService.readTextFile(friend.memory_path);
+  if (content == null) {
+    await fileService.writeTextFile(friend.memory_path, '');
+    return '';
+  }
+
+  return clampMemoryContent(content);
+}
+
+async function writeFriendMemory(friend: FriendRecord, content: string): Promise<void> {
+  await fileService.writeTextFile(friend.memory_path, clampMemoryContent(content));
+}
+
+async function ensureFriendMemoryFiles(friends: FriendRecord[]): Promise<void> {
+  for (const friend of friends) {
+    if ((await fileService.readTextFile(friend.memory_path)) == null) {
+      await fileService.writeTextFile(friend.memory_path, '');
+    }
+  }
+}
+
+async function buildFriendMemoryExportList(): Promise<AppStateFriendMemoryExport[]> {
+  const bundles: AppStateFriendMemoryExport[] = [];
+
+  for (const friend of state.friends) {
+    bundles.push({
+      friend_id: friend.id,
+      memory_path: friend.memory_path,
+      content: await readFriendMemory(friend),
+    });
+  }
+
+  return bundles;
+}
+
+async function restoreFriendMemoryFiles(
+  friends: FriendRecord[],
+  bundles: AppStateFriendMemoryExport[] | undefined,
+): Promise<void> {
+  const byFriendId = new Map((bundles ?? []).map((item) => [item.friend_id, item]));
+  const byPath = new Map((bundles ?? []).map((item) => [item.memory_path, item]));
+
+  for (const friend of friends) {
+    const bundle = byFriendId.get(friend.id) ?? byPath.get(friend.memory_path);
+    await writeFriendMemory(friend, bundle?.content ?? '');
+  }
 }
 
 function getPrimaryModel(): ModelRecord {
@@ -567,8 +695,86 @@ function getModelById(id: string): ModelRecord | undefined {
   return state.models.find((model) => model.id === id);
 }
 
+function getFirstImageCapableModel(): ModelRecord | undefined {
+  return state.models.find((model) => model.id.trim() && model.base_url.trim() && model.img_dealing);
+}
+
 function getFriendModel(friend: FriendRecord): ModelRecord {
   return getModelById(friend.model_id) ?? getPrimaryModel();
+}
+
+async function summarizeEventImages(
+  event: EventRecord,
+  purpose: 'friend_comment' | 'event_enrichment' | 'summary' | 'arrange_tags',
+): Promise<string> {
+  if (!eventHasImageAssets(event)) {
+    return '';
+  }
+
+  const imageModel = getFirstImageCapableModel();
+  if (!imageModel) {
+    throw new Error('当前没有可处理图片输入的模型，无法处理含图内容');
+  }
+
+  const cacheKey = `${purpose}:${imageModel.id}:${event.id}`;
+  const cached = imageSummaryCache.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  const task = aiService
+    .summarizeImages({
+      model: imageModel,
+      images: event.assets,
+      purpose,
+    })
+    .catch((error) => {
+      imageSummaryCache.delete(cacheKey);
+      throw error;
+    });
+
+  imageSummaryCache.set(cacheKey, task);
+  return task;
+}
+
+async function buildSingleEventVisualContext(
+  targetModel: ModelRecord,
+  event: EventRecord,
+  purpose: 'friend_comment' | 'event_enrichment',
+): Promise<{
+  attachImages: boolean;
+  imageSummary?: string;
+}> {
+  if (!eventHasImageAssets(event)) {
+    return { attachImages: false };
+  }
+
+  if (targetModel.img_dealing) {
+    return { attachImages: true };
+  }
+
+  return {
+    attachImages: false,
+    imageSummary: await summarizeEventImages(event, purpose),
+  };
+}
+
+async function buildImageSummaryByEventId(
+  targetModel: ModelRecord,
+  events: EventRecord[],
+  purpose: 'summary' | 'arrange_tags',
+): Promise<Record<string, string>> {
+  if (targetModel.img_dealing) {
+    return {};
+  }
+
+  const entries = await Promise.all(
+    events
+      .filter((event) => eventHasImageAssets(event))
+      .map(async (event) => [event.id, await summarizeEventImages(event, purpose)] as const),
+  );
+
+  return Object.fromEntries(entries.filter((entry) => Boolean(entry[1].trim())));
 }
 
 function taskStateOf(event: EventRecord): 'event' | 'ongoing' | 'finished' | 'failed' {
@@ -636,10 +842,28 @@ function queueEventEnrichment(eventId: string): void {
   });
 }
 
-function queueFriendJobs(event: EventRecord): void {
+function queueFriendJobs(event: EventRecord, trigger: FriendCommentTrigger = { kind: 'event' }): void {
   state.friends
     .filter((friend) => friend.enabled)
     .forEach((friend) => {
+      if (trigger.kind === 'comment' && trigger.sender && trigger.sender !== 'user' && friend.id === trigger.sender) {
+        return;
+      }
+
+      const sourceCommentId = trigger.kind === 'comment' ? trigger.commentId ?? null : null;
+      const exists = state.ai_jobs.some(
+        (job) =>
+          job.type === 'friend_comment' &&
+          job.status === 'pending' &&
+          job.payload.phase === 'generate' &&
+          job.payload.event_id === event.id &&
+          job.payload.friend_id === friend.id &&
+          (job.payload.source_comment_id ?? null) === sourceCommentId,
+      );
+      if (exists) {
+        return;
+      }
+
       queueJob({
         id: randomId('job'),
         type: 'friend_comment',
@@ -650,6 +874,7 @@ function queueFriendJobs(event: EventRecord): void {
           event_id: event.id,
           friend_id: friend.id,
           phase: 'generate',
+          source_comment_id: sourceCommentId,
         },
       });
     });
@@ -851,7 +1076,13 @@ function createTaskFromText(text: string, dueAt: string | null): EventRecord | n
   return event;
 }
 
-function addComment(eventId: string, content: string, sender = 'user', attitude?: number): void {
+function addComment(
+  eventId: string,
+  content: string,
+  sender = 'user',
+  attitude?: number,
+  replyToCommentId?: string,
+): void {
   const event = getEventById(eventId);
   if (!event || !content.trim()) {
     return;
@@ -863,13 +1094,15 @@ function addComment(eventId: string, content: string, sender = 'user', attitude?
     sender,
     time: new Date().toISOString(),
     attitude,
+    reply_to_comment_id: replyToCommentId,
   };
 
   event.comments.push(comment);
-
-  if (sender === 'user') {
-    queueFriendJobs(event);
-  }
+  queueFriendJobs(event, {
+    kind: 'comment',
+    commentId: comment.id,
+    sender,
+  });
 }
 
 function updateTaskDueTime(eventId: string, dueAt: string | null): void {
@@ -998,8 +1231,10 @@ async function buildSummary(interval: SummaryInterval, rangeEnd: string, force: 
         time: event.time,
       }));
 
+  const summaryModel = getPrimaryModel();
+  const imageSummaryByEventId = await buildImageSummaryByEventId(summaryModel, relevantEvents, 'summary');
   const summaryCopy = await aiService.generateSummary({
-    model: getPrimaryModel(),
+    model: summaryModel,
     summary: {
       interval,
       rangeLabel: `${toDateKey(startDate)} → ${toDateKey(endDate)}`,
@@ -1030,6 +1265,7 @@ async function buildSummary(interval: SummaryInterval, rangeEnd: string, force: 
             .map((tag) => `${tag.type}:${tag.label}`),
           comment_count: event.comments.length,
           task_state: taskStateOf(event),
+          image_summary: imageSummaryByEventId[event.id] ?? '',
         })),
     },
   });
@@ -1040,7 +1276,7 @@ async function buildSummary(interval: SummaryInterval, rangeEnd: string, force: 
     id: existingIndex >= 0 ? state.mails[existingIndex].id : randomId('mail'),
     time: new Date().toISOString(),
     title,
-    sender: 'AshDiary AI',
+    sender: 'Ember AI',
     content: buildSummaryMailHtml({
       interval,
       rangeLabel: `${toDateKey(startDate)} → ${toDateKey(endDate)}`,
@@ -1107,11 +1343,15 @@ async function executeJob(job: PendingAiJob): Promise<void> {
         return;
       }
 
+      const model = getPrimaryModel();
+      const visualContext = await buildSingleEventVisualContext(model, event, 'event_enrichment');
       const enrichment = await aiService.enrichEvent({
-        model: getPrimaryModel(),
+        model,
         event: cloneEvent(event),
         existingTags: state.tags.filter((tag) => !tag.system).map(cloneTag),
         isTask: isTask(event),
+        imageSummary: visualContext.imageSummary,
+        attachImages: visualContext.attachImages,
       });
 
       if (!event.title.trim() && enrichment.title) {
@@ -1140,14 +1380,32 @@ async function executeJob(job: PendingAiJob): Promise<void> {
           return;
         }
 
+        const sourceCommentId =
+          typeof job.payload.source_comment_id === 'string' && job.payload.source_comment_id.trim()
+            ? job.payload.source_comment_id.trim()
+            : undefined;
+        const sourceComment = getCommentById(event, sourceCommentId);
+        const model = getFriendModel(friend);
+        const visualContext = await buildSingleEventVisualContext(model, event, 'friend_comment');
         const candidate = await aiService.generateFriendComment({
-          model: getFriendModel(friend),
+          model,
           event: cloneEvent(event),
           friend: { ...friend },
           isTask: isTask(event),
           taskState: taskStateOf(event),
+          memory: await readFriendMemory(friend),
+          memoryMaxLength: FRIEND_MEMORY_MAX_CHARS,
+          repliedComment: sourceComment,
+          imageSummary: visualContext.imageSummary,
+          attachImages: visualContext.attachImages,
         });
-        const probability = clamp(friend.active * candidate.attitude, 0, 1);
+        await writeFriendMemory(friend, candidate.memory);
+
+        const probability = clamp(
+          friend.active * candidate.attitude * (sourceComment && sourceComment.sender !== 'user' ? friend.ai_active : 1),
+          0,
+          1,
+        );
         if (Math.random() > probability) {
           job.status = 'done';
           return;
@@ -1169,6 +1427,7 @@ async function executeJob(job: PendingAiJob): Promise<void> {
             friend_id: friend.id,
             attitude: candidate.attitude,
             comment: candidate.comment,
+            reply_to_comment_id: sourceComment?.id,
           },
         });
         job.status = 'done';
@@ -1177,13 +1436,24 @@ async function executeJob(job: PendingAiJob): Promise<void> {
 
       const comment = String(job.payload.comment ?? '').trim();
       const attitude = Number(job.payload.attitude);
+      const replyToCommentId =
+        typeof job.payload.reply_to_comment_id === 'string' && job.payload.reply_to_comment_id.trim()
+          ? job.payload.reply_to_comment_id.trim()
+          : undefined;
 
-      if (!event || !comment || event.comments.some((item) => item.sender === friendId && item.content === comment)) {
+      if (
+        !event ||
+        !comment ||
+        event.comments.some(
+          (item) =>
+            item.sender === friendId && item.content === comment && (item.reply_to_comment_id ?? '') === (replyToCommentId ?? ''),
+        )
+      ) {
         job.status = 'done';
         return;
       }
 
-      addComment(event.id, comment, friendId, Number.isFinite(attitude) ? attitude : undefined);
+      addComment(event.id, comment, friendId, Number.isFinite(attitude) ? attitude : undefined, replyToCommentId);
       job.status = 'done';
       return;
     }
@@ -1199,10 +1469,13 @@ async function executeJob(job: PendingAiJob): Promise<void> {
     }
 
     if (job.type === 'arrange_tags') {
+      const model = getPrimaryModel();
+      const recentEvents = sortedEvents.value.slice(0, 50).map(cloneEvent);
       const drafts = await aiService.arrangeTags({
-        model: getPrimaryModel(),
-        recentEvents: sortedEvents.value.slice(0, 50).map(cloneEvent),
+        model,
+        recentEvents,
         existingTags: state.tags.filter((tag) => !tag.system).map(cloneTag),
+        imageSummaryByEventId: await buildImageSummaryByEventId(model, recentEvents, 'arrange_tags'),
       });
       const created = materializeAiTags(drafts);
       if (created.length) {
@@ -1289,6 +1562,7 @@ async function exportJsonSnapshot(): Promise<void> {
     exported_at: new Date().toISOString(),
     data: snapshotState(),
     assets: await buildAssetExportList(),
+    friend_memories: await buildFriendMemoryExportList(),
   };
 
   await fileService.exportTextFile(
@@ -1324,6 +1598,7 @@ async function importJsonSnapshot(text: string): Promise<void> {
   }
 
   replaceState(next);
+  await restoreFriendMemoryFiles(next.friends, parsed.friend_memories);
   runDueTaskFailures();
   await syncAllTaskNotifications();
   scheduleAiPump();
@@ -1389,6 +1664,7 @@ function addModel(): void {
     name: 'New Model',
     base_url: '',
     api_key: '',
+    img_dealing: true,
   });
 }
 
@@ -1401,11 +1677,17 @@ function removeModel(id: string): void {
 }
 
 function addFriend(): void {
-  state.friends.push(createDefaultFriendDraft(state.models[0]?.id ?? 'your-model-id', randomId('friend')));
+  const friend = createDefaultFriendDraft(state.models[0]?.id ?? 'your-model-id', randomId('friend'));
+  state.friends.push(friend);
+  void writeFriendMemory(friend, '');
 }
 
 function removeFriend(id: string): void {
+  const target = state.friends.find((friend) => friend.id === id);
   state.friends = state.friends.filter((friend) => friend.id !== id);
+  if (target) {
+    void fileService.removeFile(target.memory_path);
+  }
 }
 
 function selectMyPanel(panel: MyPanel): void {
@@ -1437,6 +1719,7 @@ export async function initializeAppStore(): Promise<void> {
   const next = normalizeState(loaded ?? legacyState ?? undefined);
   await hydrateAssets(next.events);
   replaceState(next);
+  await ensureFriendMemoryFiles(next.friends);
   bootstrapped = true;
   if (legacyRaw && typeof localStorage !== 'undefined') {
     localStorage.removeItem(LEGACY_STORAGE_KEY);
