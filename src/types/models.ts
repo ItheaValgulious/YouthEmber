@@ -4,6 +4,7 @@ export type SummaryInterval = '7d' | '3m' | '1y';
 export type MyPanel = 'mailbox' | 'diary' | 'setting' | 'data';
 export type AiJobType = 'enrich_event' | 'friend_comment' | 'summary' | 'arrange_tags';
 export type AiJobStatus = 'pending' | 'done' | 'failed';
+export type DiaryPaperSize = 'B5' | 'B6';
 
 export interface LocationPayload {
   country: string | null;
@@ -131,6 +132,93 @@ export interface PendingAiJob {
   last_error?: string;
 }
 
+export interface DiarySourceKey {
+  kind: 'event' | 'summary';
+  id: string;
+  date: string;
+}
+
+export interface DiaryPlacedBlockBase {
+  id: string;
+  page_number: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation: number;
+  source: DiarySourceKey;
+}
+
+export interface DiaryPlacedDateBlock extends DiaryPlacedBlockBase {
+  type: 'date';
+  label: string;
+  carry_over: boolean;
+}
+
+export interface DiaryPlacedEventTextBlock extends DiaryPlacedBlockBase {
+  type: 'event_text';
+  event_id: string;
+  title: string;
+  time_label: string;
+  body: string;
+  continuation: boolean;
+  body_kind: 'text' | 'title_only';
+  other_assets: Array<{ id: string; type: AssetType; label: string }>;
+}
+
+export interface DiaryPlacedEventImageBlock extends DiaryPlacedBlockBase {
+  type: 'event_image';
+  event_id: string;
+  asset: AssetRecord;
+}
+
+export interface DiaryPlacedCommentGroupBlock extends DiaryPlacedBlockBase {
+  type: 'comment_group';
+  event_id: string;
+  layout: 'side' | 'row';
+  comments: Array<{
+    id: string;
+    sender: string;
+    time_label: string;
+    content: string;
+  }>;
+}
+
+export interface DiaryPlacedSummaryBlock extends DiaryPlacedBlockBase {
+  type: 'summary';
+  summary_id: string;
+  interval: SummaryInterval;
+  title: string;
+  body: string;
+  range_label: string;
+}
+
+export type DiaryPlacedBlock =
+  | DiaryPlacedDateBlock
+  | DiaryPlacedEventTextBlock
+  | DiaryPlacedEventImageBlock
+  | DiaryPlacedCommentGroupBlock
+  | DiaryPlacedSummaryBlock;
+
+export interface DiaryPageRecord {
+  key: string;
+  page_number: number;
+  anchor: DiarySourceKey | null;
+  blocks: DiaryPlacedBlock[];
+}
+
+export interface DiaryBookRecord {
+  version: number;
+  paper_size: DiaryPaperSize;
+  font_scale: number;
+  page_width: number;
+  page_height: number;
+  inner_width: number;
+  inner_height: number;
+  generated_at: string;
+  pages: DiaryPageRecord[];
+}
+
 export interface AppConfig {
   timezone: string;
   pre_alert: number;
@@ -141,6 +229,8 @@ export interface AppConfig {
   abstract_show_comment_count: number;
   summary_intervals: SummaryInterval[];
   page_margin: number;
+  diary_paper_size: DiaryPaperSize;
+  diary_font_scale: number;
   mood_weights: Record<string, number>;
 }
 
@@ -154,6 +244,7 @@ export interface AppState {
   events: EventRecord[];
   mails: MailRecord[];
   summaries: SummaryRecord[];
+  diary_book: DiaryBookRecord | null;
   ai_jobs: PendingAiJob[];
   last_summary_check: string | null;
   last_opened_my_panel: MyPanel;
@@ -179,4 +270,5 @@ export interface AppStateExportBundle {
   data: AppState;
   assets?: AppStateAssetExport[];
   friend_memories?: AppStateFriendMemoryExport[];
+  ui_preferences?: Record<string, unknown>;
 }

@@ -5,7 +5,11 @@ type FriendPreset = Omit<FriendRecord, 'model_id'>;
 export const DEFAULT_FRIEND_AI_ACTIVE = 0.1;
 
 function sanitizeFriendMemorySegment(value: string): string {
-  const clean = value.trim().replace(/[^\w.-]+/g, '-').replace(/-{2,}/g, '-').replace(/^-|-$/g, '');
+  const clean = value
+    .trim()
+    .replace(/[^\w.-]+/g, '-')
+    .replace(/-{2,}/g, '-')
+    .replace(/^-|-$/g, '');
   return clean || 'friend';
 }
 
@@ -22,6 +26,8 @@ const DEFAULT_CONFIG_VALUES: Omit<AppConfig, 'timezone'> = {
   abstract_show_comment_count: 5,
   summary_intervals: ['7d', '3m', '1y'],
   page_margin: 24,
+  diary_paper_size: 'B5',
+  diary_font_scale: 1,
   mood_weights: {
     happy: 2.0,
     moved: 1.5,
@@ -30,7 +36,7 @@ const DEFAULT_CONFIG_VALUES: Omit<AppConfig, 'timezone'> = {
     hesitant: -1.0,
     upset: -2.0,
     boring: -1.0,
-    lonely: -2.0
+    lonely: -2.0,
   },
 };
 
@@ -90,13 +96,7 @@ export const DEFAULT_NEW_FRIEND_PRESET: FriendPreset = {
   enabled: true,
 };
 
-function tag(
-  id: string,
-  label: string,
-  type: Tag['type'],
-  rules: string,
-  system = false,
-): Tag {
+function tag(id: string, label: string, type: Tag['type'], rules: string, system = false): Tag {
   return {
     id,
     label,

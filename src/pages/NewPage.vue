@@ -2,99 +2,100 @@
   <ion-page>
     <ion-header translucent>
       <ion-toolbar>
-        <ion-title>New</ion-title>
+        <ion-title>{{ ui.t('app_new') }}</ion-title>
         <ion-buttons slot="end">
           <ion-button :disabled="submitting" @click="submit">
             <ion-icon slot="start" :icon="sendOutline" />
-            发布
+            {{ ui.t('publish') }}
           </ion-button>
         </ion-buttons>
       </ion-toolbar>
     </ion-header>
 
     <ion-content fullscreen>
-      <div class="content-wrap card-stack">
-        <ion-card class="sketch-card">
-          <ion-card-header>
-            <ion-card-title>创建 Event</ion-card-title>
-          </ion-card-header>
-          <ion-card-content class="card-stack">
-            <label>
-              <div class="section-title">正文</div>
+      <div class="content-wrap desk-stack">
+        <section class="paper-sheet new-sheet">
+          <div class="new-sheet__top row between wrap">
+            <div>
+              <div class="ink-label handwritten">{{ ui.t('loose_page') }}</div>
+              <h2 class="ink-title">{{ ui.t('write_new_entry') }}</h2>
+            </div>
+
+            <div class="new-sheet__tools row wrap">
+              <ion-button fill="outline" :disabled="working" @click="takePhoto">
+                <ion-icon slot="start" :icon="cameraOutline" />
+                {{ ui.t('camera') }}
+              </ion-button>
+              <ion-button fill="outline" :disabled="working" @click="pickImages">
+                <ion-icon slot="start" :icon="imagesOutline" />
+                {{ ui.t('images') }}
+              </ion-button>
+              <ion-button fill="outline" :disabled="working" @click="fileInput?.click()">
+                <ion-icon slot="start" :icon="folderOpenOutline" />
+                {{ ui.t('files') }}
+              </ion-button>
+              <ion-button fill="outline" :disabled="working" @click="openTagsWindow">
+                <ion-icon slot="start" :icon="pricetagOutline" />
+                {{ ui.t('tags') }}
+              </ion-button>
+            </div>
+          </div>
+
+          <div class="new-sheet__body">
+            <label class="new-sheet__writing">
+              <div class="section-title">{{ ui.t('body') }}</div>
               <textarea
                 ref="rawInput"
                 v-model="raw"
-                class="native-textarea"
-                placeholder="记录今天发生了什么。"
+                class="native-textarea new-sheet__textarea"
+                :placeholder="ui.t('entry_placeholder')"
                 @input="resizeTextarea"
               />
             </label>
 
-            <div class="card-stack new-toolbar">
-              <div class="section-title">工具</div>
-              <div class="row wrap">
-                <ion-button fill="outline" :disabled="working" @click="takePhoto">
-                  <ion-icon slot="start" :icon="cameraOutline" />
-                  拍摄
-                </ion-button>
-                <ion-button fill="outline" :disabled="working" @click="pickImages">
-                  <ion-icon slot="start" :icon="imagesOutline" />
-                  相册
-                </ion-button>
-                <ion-button fill="outline" :disabled="working" @click="fileInput?.click()">
-                  <ion-icon slot="start" :icon="folderOpenOutline" />
-                  文件
-                </ion-button>
-                <ion-button fill="outline" :disabled="working" @click="openTagsWindow">
-                  <ion-icon slot="start" :icon="pricetagOutline" />
-                  标签
-                </ion-button>
-              </div>
-
-              <input
-                ref="fileInput"
-                hidden
-                accept="image/*,video/*,audio/*"
-                multiple
-                type="file"
-                @change="handleUpload"
-              />
-            </div>
-
-            <div v-if="hasSelectedSummary" class="card-stack">
-              <div class="section-title">已选标签</div>
+            <div v-if="hasSelectedSummary" class="paper-note new-sheet__tags">
+              <div class="section-title">{{ ui.t('attached_context') }}</div>
               <div class="tag-row">
                 <span v-for="tag in selectedTags" :key="`${tag.type}:${tag.label}`" class="tag-chip is-selected">
                   {{ tag.label }}
                 </span>
                 <span v-if="includeLocation" class="tag-chip is-selected">
-                  {{ currentLocation?.label || '当前位置' }}
+                  {{ currentLocation?.label || ui.t('current_location') }}
                 </span>
               </div>
             </div>
 
-            <div v-if="assets.length" class="preview-grid">
-              <div v-for="asset in assets" :key="asset.id" class="preview-card">
+            <div v-if="assets.length" class="preview-grid new-sheet__assets">
+              <div v-for="asset in assets" :key="asset.id" class="preview-card new-sheet__asset">
                 <img v-if="asset.type === 'image'" :src="asset.display_path || asset.filepath" alt="preview" />
                 <video
                   v-else-if="asset.type === 'video'"
                   :poster="asset.thumbnail_path"
-                  :src="asset.display_path || asset.filepath"
-                  muted
+                    :src="asset.display_path || asset.filepath"
+                    muted
                 />
-                <div v-else class="preview-meta">音频</div>
-                <div class="preview-meta card-stack">
+                <div v-else class="preview-meta">{{ ui.t('audio') }}</div>
+                <div class="preview-meta paper-stack">
                   <div class="row between">
                     <span>{{ asset.type }}</span>
                     <span v-if="asset.duration_ms">{{ Math.round(asset.duration_ms / 1000) }}s</span>
                     <span v-else-if="asset.size_bytes">{{ formatSize(asset.size_bytes) }}</span>
                   </div>
-                  <button class="tag-chip" @click="removeAsset(asset.id)">移除</button>
+                  <button class="tag-chip" @click="removeAsset(asset.id)">{{ ui.t('remove_asset') }}</button>
                 </div>
               </div>
             </div>
-          </ion-card-content>
-        </ion-card>
+          </div>
+
+          <input
+            ref="fileInput"
+            hidden
+            accept="image/*,video/*,audio/*"
+            multiple
+            type="file"
+            @change="handleUpload"
+          />
+        </section>
       </div>
     </ion-content>
 
@@ -117,10 +118,6 @@ import { useRouter } from 'vue-router';
 import {
   IonButton,
   IonButtons,
-  IonCard,
-  IonCardContent,
-  IonCardHeader,
-  IonCardTitle,
   IonContent,
   IonHeader,
   IonIcon,
@@ -139,10 +136,12 @@ import {
 import TagsWindow from '../components/TagsWindow.vue';
 import { cameraService, fileService, locationService } from '../services';
 import { useAppStore } from '../store/app-store';
+import { useUiPreferences } from '../ui/preferences';
 import type { AssetRecord } from '../types/models';
 
 const router = useRouter();
 const store = useAppStore();
+const ui = useUiPreferences();
 
 const raw = ref('');
 const selectedTagKeys = ref<string[]>([]);
@@ -192,7 +191,7 @@ function resizeTextarea(): void {
   }
 
   element.style.height = '0px';
-  element.style.height = `${Math.max(118, element.scrollHeight)}px`;
+  element.style.height = `${Math.max(200, element.scrollHeight)}px`;
 }
 
 onMounted(async () => {
@@ -243,7 +242,7 @@ async function takePhoto(): Promise<void> {
       appendAssets([asset]);
     }
   } catch (error) {
-    window.alert(error instanceof Error ? error.message : '拍摄失败');
+    window.alert(error instanceof Error ? error.message : ui.t('camera'));
   } finally {
     working.value = false;
   }
@@ -254,7 +253,7 @@ async function pickImages(): Promise<void> {
   try {
     appendAssets(await cameraService.pickImages(8));
   } catch (error) {
-    window.alert(error instanceof Error ? error.message : '选择图片失败');
+    window.alert(error instanceof Error ? error.message : ui.t('images'));
   } finally {
     working.value = false;
   }
@@ -271,7 +270,7 @@ async function handleUpload(domEvent: Event): Promise<void> {
   try {
     appendAssets(await fileService.saveFiles(files, undefined, assets.value.length));
   } catch (error) {
-    window.alert(error instanceof Error ? error.message : '文件上传失败');
+    window.alert(error instanceof Error ? error.message : ui.t('files'));
   } finally {
     if (input) {
       input.value = '';
@@ -291,7 +290,7 @@ function removeAsset(id: string): void {
 
 async function submit(): Promise<void> {
   if (!raw.value.trim() && !assets.value.length) {
-    window.alert('至少写一点内容，或者附带一项媒体。');
+    window.alert(ui.t('write_something_or_attach_media'));
     return;
   }
 
@@ -327,19 +326,60 @@ async function submit(): Promise<void> {
 </script>
 
 <style scoped>
-.new-toolbar {
-  position: sticky;
-  top: 76px;
-  z-index: 4;
-  padding: 12px;
-  border-radius: 18px;
-  background: rgba(255, 251, 244, 0.92);
-  border: 1px solid rgba(180, 139, 89, 0.28);
-  backdrop-filter: blur(10px);
+.new-sheet {
+  padding: 24px;
 }
 
-.native-textarea {
+.new-sheet__top {
+  align-items: start;
+  gap: 18px;
+}
+
+.new-sheet__tools {
+  position: sticky;
+  top: 76px;
+  z-index: 2;
+  padding: 10px;
+  border-radius: 999px;
+  background: rgba(255, 247, 232, 0.88);
+  border: 1px solid rgba(118, 89, 57, 0.16);
+  box-shadow: 0 12px 24px rgba(88, 64, 34, 0.08);
+}
+
+.new-sheet__body {
+  display: grid;
+  gap: 18px;
+  margin-top: 18px;
+}
+
+.new-sheet__writing {
+  display: grid;
+  gap: 10px;
+}
+
+.new-sheet__textarea {
+  min-height: 220px;
+  border-radius: 24px;
+  line-height: 1.8;
   resize: none;
   overflow: hidden;
+}
+
+.new-sheet__tags {
+  max-width: 560px;
+}
+
+.new-sheet__assets {
+  margin-top: 6px;
+}
+
+.new-sheet__asset {
+  background: rgba(255, 252, 246, 0.94);
+}
+
+@media (max-width: 680px) {
+  .new-sheet__tools {
+    border-radius: 28px;
+  }
 }
 </style>

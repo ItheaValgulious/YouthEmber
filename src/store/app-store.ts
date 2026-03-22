@@ -10,10 +10,12 @@ import {
   createDefaultTags,
 } from '../config/defaults';
 import { addDays, compareIsoDesc, diffDays, endOfDay, formatDateTime, toDateKey } from '../lib/date';
+import { buildDiaryBook, getDiaryBookVersion } from '../lib/diary-book';
 import { buildDiaryHtml, buildMailBundleHtml, buildSummaryMailHtml } from '../lib/exporters';
 import { dedupeTags, hasTagLabel, mergeTagCatalog, normalizeLabel, sortTagsForDisplay } from '../lib/tag';
 import { aiService, databaseService, fileService, notificationService } from '../services';
 import type { AiTagDraft } from '../services/ai-service';
+import { restoreUiPreferences, snapshotUiPreferences, t as uiText, type UiPreferencesSnapshot } from '../ui/preferences';
 import type {
   AppState,
   AppStateAssetExport,
@@ -21,6 +23,7 @@ import type {
   AppStateFriendMemoryExport,
   AssetRecord,
   CommentRecord,
+  DiaryBookRecord,
   EventRecord,
   FriendRecord,
   MailRecord,
@@ -53,6 +56,7 @@ let taskDeadlineTimer: number | null = null;
 let summaryCheckTimer: number | null = null;
 let bootstrapped = false;
 let persistTimer: number | null = null;
+let diaryBookTimer: number | null = null;
 let persistChain = Promise.resolve();
 let primedComposerAssets: AssetRecord[] = [];
 const imageSummaryCache = new Map<string, Promise<string>>();
@@ -95,6 +99,14 @@ function cloneModel(model: ModelRecord): ModelRecord {
   return {
     ...model,
   };
+}
+
+function cloneDiaryBook(book: DiaryBookRecord | null | undefined): DiaryBookRecord | null {
+  if (!book) {
+    return null;
+  }
+
+  return JSON.parse(JSON.stringify(book)) as DiaryBookRecord;
 }
 
 function normalizeAsset(raw: Partial<AssetRecord>): AssetRecord {
@@ -226,6 +238,14 @@ function normalizeSummary(raw: Partial<SummaryRecord>): SummaryRecord {
   };
 }
 
+function normalizeDiaryBook(raw: Partial<DiaryBookRecord> | null | undefined): DiaryBookRecord | null {
+  if (!raw || !Array.isArray(raw.pages) || raw.version !== getDiaryBookVersion()) {
+    return null;
+  }
+
+  return cloneDiaryBook(raw as DiaryBookRecord);
+}
+
 function effectiveTimeOf(event: EventRecord): string {
   return event.time ?? event.created_at;
 }
@@ -312,7 +332,7 @@ function createInitialState(): AppState {
   };
 
   return {
-    schema_version: 1,
+    schema_version: 2,
     config: createDefaultConfig(),
     token: '',
     models: createDefaultModels(),
@@ -321,6 +341,7 @@ function createInitialState(): AppState {
     events: [introEvent],
     mails: [makeWelcomeMail()],
     summaries: [],
+    diary_book: null,
     ai_jobs: [],
     last_summary_check: null,
     last_opened_my_panel: 'mailbox',
@@ -357,7 +378,7 @@ function normalizeState(raw: Partial<AppState> | undefined): AppState {
       : seed.friends.map((item) => normalizeFriend(item, fallbackModelId));
 
   return {
-    schema_version: 1,
+    schema_version: 2,
     config,
     token: raw.token ?? '',
     models,
@@ -366,6 +387,7 @@ function normalizeState(raw: Partial<AppState> | undefined): AppState {
     events: Array.isArray(raw.events) && raw.events.length ? raw.events.map(normalizeEvent) : seed.events,
     mails: Array.isArray(raw.mails) && raw.mails.length ? raw.mails.map(normalizeMail) : seed.mails,
     summaries: Array.isArray(raw.summaries) ? raw.summaries.map(normalizeSummary) : [],
+    diary_book: normalizeDiaryBook(raw.diary_book),
     ai_jobs: Array.isArray(raw.ai_jobs) ? raw.ai_jobs.map(normalizeJob) : [],
     last_summary_check: raw.last_summary_check ?? null,
     last_opened_my_panel: raw.last_opened_my_panel ?? 'mailbox',
@@ -434,6 +456,17 @@ watch(
 
     void syncAllTaskNotifications();
     scheduleTaskDeadlinePump();
+  },
+);
+
+watch(
+  buildDiaryFingerprint,
+  () => {
+    if (!bootstrapped) {
+      return;
+    }
+
+    scheduleDiaryBookRebuild();
   },
 );
 
@@ -514,6 +547,86 @@ const diaryPages = computed(() => {
   return pages;
 });
 
+const diaryBook = computed(() => state.diary_book);
+
+function buildDiaryFingerprint(): string {
+  return JSON.stringify({
+    paper_size: state.config.diary_paper_size,
+    font_scale: state.config.diary_font_scale,
+    events: state.events.map((event) => ({
+      id: event.id,
+      created_at: event.created_at,
+      time: event.time,
+      title: event.title,
+      raw: event.raw,
+      assets: event.assets.map((asset) => ({
+        id: asset.id,
+        filepath: asset.filepath,
+        display_path: asset.display_path,
+        filename: asset.filename,
+        type: asset.type,
+        upload_order: asset.upload_order,
+        mime_type: asset.mime_type,
+      })),
+      comments: event.comments.map((comment) => ({
+        id: comment.id,
+        sender: comment.sender,
+        time: comment.time,
+        content: comment.content,
+        reply_to_comment_id: comment.reply_to_comment_id ?? '',
+      })),
+    })),
+    summaries: state.summaries.map((summary) => ({
+      id: summary.id,
+      created_at: summary.created_at,
+      interval: summary.interval,
+      range_start: summary.range_start,
+      range_end: summary.range_end,
+      title: summary.title,
+      summary: summary.summary,
+      task_summary: summary.tasks.summary,
+      mood_summary: summary.mood.summary,
+    })),
+  });
+}
+
+function rebuildDiaryBook(): void {
+  state.diary_book = buildDiaryBook({
+    paperSize: state.config.diary_paper_size,
+    fontScale: state.config.diary_font_scale,
+    events: state.events.map(cloneEvent),
+    summaries: state.summaries.map(normalizeSummary),
+    formatDateTime,
+    friendName,
+  });
+}
+
+function ensureDiaryBook(): void {
+  if (
+    !state.diary_book ||
+    state.diary_book.version !== getDiaryBookVersion() ||
+    state.diary_book.paper_size !== state.config.diary_paper_size ||
+    state.diary_book.font_scale !== state.config.diary_font_scale
+  ) {
+    rebuildDiaryBook();
+  }
+}
+
+function scheduleDiaryBookRebuild(): void {
+  if (!bootstrapped || typeof window === 'undefined') {
+    return;
+  }
+
+  if (diaryBookTimer) {
+    window.clearTimeout(diaryBookTimer);
+    diaryBookTimer = null;
+  }
+
+  diaryBookTimer = window.setTimeout(() => {
+    rebuildDiaryBook();
+  }, 80);
+}
+
 function replaceReactiveArray<T>(target: T[], next: T[]): void {
   target.splice(0, target.length, ...next);
 }
@@ -531,6 +644,7 @@ function replaceState(next: AppState): void {
   replaceReactiveArray(state.events, next.events.map(cloneEvent));
   replaceReactiveArray(state.mails, next.mails.map(normalizeMail));
   replaceReactiveArray(state.summaries, next.summaries.map(normalizeSummary));
+  state.diary_book = cloneDiaryBook(next.diary_book);
   replaceReactiveArray(state.ai_jobs, next.ai_jobs.map(normalizeJob));
   state.last_summary_check = next.last_summary_check;
   state.last_opened_my_panel = next.last_opened_my_panel;
@@ -1048,9 +1162,6 @@ function createTaskFromText(text: string, dueAt: string | null): EventRecord | n
   }
 
   const now = new Date().toISOString();
-  const [firstLine, ...rest] = clean.split(/\r?\n/);
-  const title = firstLine.trim();
-  const raw = rest.join('\n').trim();
   const tags = registerTagUsage(
     dedupeTags([getSystemTag('task'), getSystemTag('ongoing')]),
     now,
@@ -1060,8 +1171,8 @@ function createTaskFromText(text: string, dueAt: string | null): EventRecord | n
     id: randomId('evt'),
     created_at: now,
     time: dueAt,
-    title,
-    raw,
+    title: '',
+    raw: clean,
     tags,
     assets: [],
     comments: [],
@@ -1558,11 +1669,12 @@ async function buildAssetExportList(): Promise<AppStateAssetExport[]> {
 
 async function exportJsonSnapshot(): Promise<void> {
   const payload: AppStateExportBundle = {
-    schema_version: 1,
+    schema_version: 2,
     exported_at: new Date().toISOString(),
     data: snapshotState(),
     assets: await buildAssetExportList(),
     friend_memories: await buildFriendMemoryExportList(),
+    ui_preferences: snapshotUiPreferences(),
   };
 
   await fileService.exportTextFile(
@@ -1573,9 +1685,12 @@ async function exportJsonSnapshot(): Promise<void> {
 }
 
 async function importJsonSnapshot(text: string): Promise<void> {
-  const parsed = JSON.parse(text) as Partial<AppStateExportBundle> & { data?: Partial<AppState> };
+  const parsed = JSON.parse(text) as Partial<AppStateExportBundle> & {
+    data?: Partial<AppState>;
+    ui_preferences?: Partial<UiPreferencesSnapshot>;
+  };
 
-  if ((parsed.schema_version ?? 1) !== 1) {
+  if (![1, 2].includes(parsed.schema_version ?? 1)) {
     throw new Error('暂不支持该 schema_version');
   }
 
@@ -1598,44 +1713,59 @@ async function importJsonSnapshot(text: string): Promise<void> {
   }
 
   replaceState(next);
+  await restoreUiPreferences(parsed.ui_preferences);
   await restoreFriendMemoryFiles(next.friends, parsed.friend_memories);
   runDueTaskFailures();
   await syncAllTaskNotifications();
   scheduleAiPump();
   ensureDailySummaries(true);
+  ensureDiaryBook();
   scheduleTaskDeadlinePump();
   scheduleSummaryCheckPump();
   schedulePersist();
 }
 
 async function exportDiaryHtml(): Promise<void> {
-  const groups = await Promise.all(
-    diaryPages.value.map(async (page) =>
-      Promise.all(
-        page.map(async (group) => ({
-          date: group.date,
-          events: await Promise.all(
-            group.events.map(async (event) => ({
-              ...cloneEvent(event),
-              assets: await Promise.all(
-                event.assets.map(async (asset) => ({
-                  ...asset,
-                  display_path: await fileService.readAssetAsDataUrl(asset),
-                })),
-              ),
-            })),
-          ),
-          summaries: group.summaries.map((summary) => ({
-            ...normalizeSummary(summary),
-          })),
-        })),
-      ),
-    ),
-  );
+  ensureDiaryBook();
+  const book = cloneDiaryBook(state.diary_book);
+  if (!book) {
+    throw new Error('No diary content to export.');
+  }
+
+  const assetDataById = new Map<string, string>();
+  for (const event of state.events) {
+    for (const asset of event.assets) {
+      assetDataById.set(asset.id, await fileService.readAssetAsDataUrl(asset));
+    }
+  }
+
+  for (const page of book.pages) {
+    for (const block of page.blocks) {
+      if (block.type === 'event_image') {
+        const dataUrl = assetDataById.get(block.asset.id);
+        if (dataUrl) {
+          block.asset.display_path = dataUrl;
+        }
+      }
+    }
+  }
+
+  const uiPreferences = snapshotUiPreferences();
 
   await fileService.exportTextFile(
     `ashdairy-diary-${toDateKey(new Date())}.html`,
-    buildDiaryHtml(groups),
+    buildDiaryHtml({
+      book,
+      paperTheme: uiPreferences.paperTheme,
+      locale: uiPreferences.locale,
+      labels: {
+        diaryBook: uiText('diary_book'),
+        scrapbookNotes: uiText('scrapbook_notes'),
+        titleOnlyFriendly: uiText('title_only_friendly'),
+        summaryWord: uiText('summary_word'),
+        writingEntry: uiPreferences.locale === 'zh-CN' ? '书写中' : 'Writing',
+      },
+    }),
     'text/html;charset=utf-8',
   );
 }
@@ -1728,6 +1858,7 @@ export async function initializeAppStore(): Promise<void> {
   runDueTaskFailures();
   await syncAllTaskNotifications();
   ensureDailySummaries();
+  ensureDiaryBook();
   scheduleAiPump();
   scheduleTaskDeadlinePump();
   scheduleSummaryCheckPump();
@@ -1739,6 +1870,7 @@ export function useAppStore(): {
   ongoingTasks: typeof ongoingTasks;
   sortedMails: typeof sortedMails;
   sortedSummaries: typeof sortedSummaries;
+  diaryBook: typeof diaryBook;
   diaryGroups: typeof diaryGroups;
   diaryPages: typeof diaryPages;
   availableTags: typeof availableTags;
@@ -1777,6 +1909,7 @@ export function useAppStore(): {
     ongoingTasks,
     sortedMails,
     sortedSummaries,
+    diaryBook,
     diaryGroups,
     diaryPages,
     availableTags,
