@@ -83,6 +83,10 @@
               {{ ui.t('platform') }}: {{ platformLabel }}<br />
               {{ ui.t('storage') }}: {{ databaseService.driverLabel }}
             </div>
+            <div v-if="store.latestAiFailure.value" class="empty-note my-debug-note">
+              AI job: {{ store.latestAiFailure.value.type }}<br />
+              Error: {{ store.latestAiFailure.value.last_error }}
+            </div>
           </section>
 
           <section class="paper-sheet my-panel">
@@ -665,6 +669,12 @@ async function handleImport(domEvent: Event): Promise<void> {
 .my-config-card {
   padding: 16px;
   transform: none;
+}
+
+.my-debug-note {
+  margin-top: 14px;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .my-diary-panel {

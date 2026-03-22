@@ -115,14 +115,29 @@ export class DatabaseService {
 
   private initialized = false;
 
+  private initializationPromise: Promise<void> | null = null;
+
   async initialize(): Promise<void> {
     if (this.initialized) {
       return;
     }
 
-    this.driver = isNativePlatform() ? new SQLiteDriver() : new PreferencesDriver();
-    await this.driver.initialize();
-    this.initialized = true;
+    if (this.initializationPromise) {
+      await this.initializationPromise;
+      return;
+    }
+
+    this.initializationPromise = (async () => {
+      this.driver = isNativePlatform() ? new SQLiteDriver() : new PreferencesDriver();
+      await this.driver.initialize();
+      this.initialized = true;
+    })();
+
+    try {
+      await this.initializationPromise;
+    } finally {
+      this.initializationPromise = null;
+    }
   }
 
   get driverLabel(): string {

@@ -342,23 +342,51 @@ function loadMore(event: CustomEvent): void {
 }
 
 @media (max-width: 760px) {
+  .flow-toolbar {
+    padding: 18px 16px;
+  }
+
+  .flow-toolbar__header {
+    align-items: start;
+    gap: 12px;
+  }
+
+  .flow-toolbar__date {
+    min-width: 0;
+    width: 100%;
+    flex-basis: 100%;
+  }
+
+  .flow-toolbar__filters {
+    margin-top: 12px;
+    gap: 12px;
+  }
+
   .flow-timeline {
     --flow-line-left: 25.5px;
+    gap: 14px;
   }
 
   .flow-day {
     grid-template-columns: 1fr;
+    gap: 14px;
   }
 
   .flow-day__rail {
     position: static;
     justify-items: start;
+    gap: 8px;
     padding-right: 0;
     padding-left: 20px;
   }
 
   .flow-day__date {
+    font-size: 0.92rem;
     text-align: left;
+  }
+
+  .flow-day__stack {
+    gap: 14px;
   }
 }
 </style>

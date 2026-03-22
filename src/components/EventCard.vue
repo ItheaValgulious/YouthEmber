@@ -312,8 +312,40 @@ function openDetail(): void {
 }
 
 @media (max-width: 620px) {
+  .event-paper {
+    border-radius: 24px;
+  }
+
   .event-paper__surface {
     padding: 18px 18px 16px;
+  }
+
+  .event-paper__top {
+    gap: 10px;
+  }
+
+  .event-paper__title-block {
+    gap: 6px;
+  }
+
+  .event-paper__time {
+    font-size: 0.92rem;
+  }
+
+  .event-paper__title {
+    font-size: 1.02rem;
+  }
+
+  .event-paper__excerpt {
+    margin-top: 12px;
+    line-height: 1.64;
+  }
+
+  .event-paper__tags,
+  .event-paper__files,
+  .event-paper__photos,
+  .event-paper__comments {
+    margin-top: 14px;
   }
 
   .event-paper__actions {

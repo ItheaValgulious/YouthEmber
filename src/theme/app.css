@@ -17,17 +17,22 @@
   --paper-radius: 28px;
   --note-radius: 20px;
   --font-body:
-    'Aptos',
-    'Segoe UI',
+    'Roboto',
+    'Noto Sans SC',
+    'Noto Sans CJK SC',
     'PingFang SC',
+    'Hiragino Sans GB',
     'Microsoft YaHei',
+    system-ui,
     sans-serif;
   --font-hand:
-    'Segoe Print',
-    'Bradley Hand',
+    'Noto Serif SC',
+    'Noto Serif CJK SC',
+    'Source Han Serif SC',
+    'Songti SC',
+    'STSong',
     'KaiTi',
-    'STKaiti',
-    cursive;
+    serif;
   --desk-surface-image: none;
   --paper-sheet-image: none;
   --paper-note-image: none;
@@ -104,6 +109,18 @@ body {
   font-family: var(--font-body);
 }
 
+body,
+button,
+input,
+textarea,
+select,
+ion-title,
+ion-label,
+ion-button,
+ion-searchbar {
+  font-family: var(--font-body);
+}
+
 ion-content::part(background) {
   background: transparent;
 }
@@ -125,6 +142,8 @@ ion-searchbar {
   --box-shadow: 0 10px 24px rgba(97, 74, 43, 0.1);
   --color: var(--ink);
   --placeholder-color: #85715c;
+  --min-height: 56px;
+  padding: 0;
 }
 
 ion-button {
@@ -433,5 +452,46 @@ ion-card.sketch-card {
 @media (min-width: 768px) {
   .content-wrap {
     padding-top: 22px;
+  }
+}
+
+@media (max-width: 760px) {
+  :root {
+    --paper-radius: 22px;
+    --note-radius: 17px;
+  }
+
+  .content-wrap {
+    padding: 12px 12px calc(100px + env(safe-area-inset-bottom));
+  }
+
+  .desk-stack {
+    gap: 16px;
+  }
+
+  .section-title,
+  .ink-label {
+    margin-bottom: 8px;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+  }
+
+  .ink-title {
+    font-size: clamp(1.15rem, 5vw, 1.55rem);
+  }
+
+  ion-searchbar {
+    --min-height: 50px;
+  }
+
+  .native-input,
+  .native-textarea,
+  .native-select {
+    border-radius: 16px;
+    padding: 10px 12px;
+  }
+
+  .native-textarea {
+    min-height: 92px;
   }
 }

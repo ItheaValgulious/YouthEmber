@@ -1828,6 +1828,14 @@ function regenerateSummary(interval: SummaryInterval): void {
   queueSummary(interval, new Date().toISOString(), true);
 }
 
+const latestAiFailure = computed(() => {
+  const failedOrRetried = [...state.ai_jobs]
+    .filter((job) => typeof job.last_error === 'string' && job.last_error.trim())
+    .sort((left, right) => new Date(right.run_at).getTime() - new Date(left.run_at).getTime());
+
+  return failedOrRetried[0] ?? null;
+});
+
 export async function initializeAppStore(): Promise<void> {
   if (bootstrapped) {
     return;
@@ -1890,6 +1898,7 @@ export function useAppStore(): {
   effectiveTimeOf: typeof effectiveTimeOf;
   formatDateTime: typeof formatDateTime;
   sortDisplayTags: typeof sortTagsForDisplay;
+  latestAiFailure: typeof latestAiFailure;
   regenerateSummary: typeof regenerateSummary;
   selectMyPanel: typeof selectMyPanel;
   addModel: typeof addModel;
@@ -1929,6 +1938,7 @@ export function useAppStore(): {
     effectiveTimeOf,
     formatDateTime,
     sortDisplayTags: sortTagsForDisplay,
+    latestAiFailure,
     regenerateSummary,
     selectMyPanel,
     addModel,

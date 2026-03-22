@@ -117,4 +117,30 @@ function createTask(): void {
   display: grid;
   gap: 18px;
 }
+
+@media (max-width: 760px) {
+  .tasks-composer,
+  .tasks-board {
+    padding: 18px 16px;
+  }
+
+  .tasks-composer__body {
+    gap: 12px;
+    margin-top: 14px;
+  }
+
+  .tasks-board__head {
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+
+  .tasks-board__count {
+    padding: 8px 12px;
+  }
+
+  .tasks-board__list {
+    gap: 14px;
+  }
+}
 </style>

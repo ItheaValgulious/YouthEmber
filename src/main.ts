@@ -28,4 +28,6 @@ Promise.all([router.isReady(), initializeAppStore(), initializeUiPreferences()])
     router.push(`/event/${taskId}`);
   });
   app.mount('#app');
+}).catch((error) => {
+  console.error('Application bootstrap failed.', error);
 });

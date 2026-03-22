@@ -1,3 +1,5 @@
+import { CapacitorHttp } from '@capacitor/core';
+
 import {
   buildEventEnrichmentPrompt,
   buildFriendCommentPrompt,
@@ -103,6 +105,12 @@ interface ChatCompletionResponse {
   error?: {
     message?: string;
   };
+}
+
+interface StructuredRequestResponse {
+  ok: boolean;
+  status: number;
+  rawText: string;
 }
 
 function stripCodeFence(value: string): string {
@@ -276,6 +284,28 @@ function buildVisionUserContent(text: string, imageUrls: string[]): ChatMessageC
 }
 
 class AiService {
+  private async sendStructuredRequest(
+    url: string,
+    headers: Record<string, string>,
+    body: Record<string, unknown>,
+  ): Promise<StructuredRequestResponse> {
+    const response = await CapacitorHttp.request({
+      method: 'POST',
+      url,
+      headers,
+      data: body,
+      responseType: 'text',
+      connectTimeout: 30_000,
+      readTimeout: 60_000,
+    });
+
+    return {
+      ok: response.status >= 200 && response.status < 300,
+      status: response.status,
+      rawText: typeof response.data === 'string' ? response.data : JSON.stringify(response.data ?? null),
+    };
+  }
+
   private async requestStructured<T>(input: {
     model: ModelRecord;
     prompt: PromptBundle;
@@ -297,27 +327,37 @@ class AiService {
       headers.Authorization = `Bearer ${input.model.api_key.trim()}`;
     }
 
-    const response = await fetch(resolveChatCompletionsUrl(input.model.base_url), {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        model: modelId,
-        temperature: input.temperature,
-        max_tokens: input.maxTokens,
-        messages: [
-          {
-            role: 'system',
-            content: input.prompt.system,
-          },
-          {
-            role: 'user',
-            content: input.userContent ?? input.prompt.user,
-          },
-        ],
-      }),
-    });
+    const requestUrl = resolveChatCompletionsUrl(input.model.base_url);
+    const requestBody = {
+      model: modelId,
+      temperature: input.temperature,
+      max_tokens: input.maxTokens,
+      messages: [
+        {
+          role: 'system',
+          content: input.prompt.system,
+        },
+        {
+          role: 'user',
+          content: input.userContent ?? input.prompt.user,
+        },
+      ],
+    };
 
-    const rawText = await response.text();
+    let response: StructuredRequestResponse;
+    try {
+      response = await this.sendStructuredRequest(requestUrl, headers, requestBody);
+    } catch (error) {
+      console.error('AI request failed before a response was received.', {
+        url: requestUrl,
+        model: modelId,
+        baseUrl: input.model.base_url,
+        error,
+      });
+      throw error;
+    }
+
+    const rawText = response.rawText;
     let payload: ChatCompletionResponse;
 
     try {

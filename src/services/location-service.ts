@@ -1,3 +1,4 @@
+import { CapacitorHttp } from '@capacitor/core';
 import { Geolocation } from '@capacitor/geolocation';
 
 import type { LocationPayload, Tag } from '../types/models';
@@ -24,7 +25,10 @@ function randomId(prefix: string): string {
 }
 
 export class LocationService {
-  private async reverseGeocode(latitude: number, longitude: number): Promise<Partial<LocationPayload> & { label?: string }> {
+  private async reverseGeocode(
+    latitude: number,
+    longitude: number,
+  ): Promise<Partial<LocationPayload> & { label?: string }> {
     const url = new URL('https://nominatim.openstreetmap.org/reverse');
     url.searchParams.set('format', 'jsonv2');
     url.searchParams.set('lat', String(latitude));
@@ -32,17 +36,23 @@ export class LocationService {
     url.searchParams.set('addressdetails', '1');
     url.searchParams.set('accept-language', 'zh-CN');
 
-    const response = await fetch(url.toString(), {
+    const response = await CapacitorHttp.request({
+      url: url.toString(),
+      method: 'GET',
       headers: {
         Accept: 'application/json',
       },
+      responseType: 'json',
     });
 
-    if (!response.ok) {
-      throw new Error(`位置反查失败（${response.status}）`);
+    if (response.status < 200 || response.status >= 300) {
+      throw new Error(`Location reverse geocoding failed: ${response.status}`);
     }
 
-    const payload = (await response.json()) as ReverseGeocodeResponse;
+    const payload =
+      typeof response.data === 'string'
+        ? (JSON.parse(response.data) as ReverseGeocodeResponse)
+        : (response.data as ReverseGeocodeResponse);
     const address = payload.address ?? {};
 
     return {
