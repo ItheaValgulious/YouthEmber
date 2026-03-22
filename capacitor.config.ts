@@ -1,10 +1,9 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.ashdairy.app',
-  appName: 'AshDiary',
+  appId: 'com.youthember.app',
+  appName: 'Ember',
   webDir: 'dist',
-  bundledWebRuntime: false,
   plugins: {
     Camera: {
       promptLabelHeader: '选择图片来源',
