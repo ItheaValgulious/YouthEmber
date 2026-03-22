@@ -15,7 +15,7 @@ import type {
   SummaryRecord,
 } from '../types/models';
 
-const DIARY_BOOK_VERSION = 2;
+const DIARY_BOOK_VERSION = 3;
 const BASE_PAGE_WIDTH = 1760;
 const BASE_PAGE_HEIGHT = 2500;
 const BASE_MARGIN_X = 140;
@@ -378,7 +378,7 @@ function estimateTextHeight(body: string, width: number, bodyKind: 'text' | 'tit
 }
 
 function shouldSplitCommentCards(layout: DiaryRowCommentBlock['layout'], width: number, count: number): boolean {
-  return layout === 'row' && count > 1 && width >= 520;
+  return layout === 'row' && count === 2 && width >= 920;
 }
 
 function estimateCommentCardHeight(comment: DiaryRowCommentBlock['comments'][number], width: number): number {
@@ -609,18 +609,13 @@ function buildEventRows(item: Extract<DiarySourceItem, { kind: 'event' }>, conte
   });
 
   const remainingCommentGroups = commentGroups.slice(usedCommentGroups);
-  for (let index = 0; index < remainingCommentGroups.length; index += 2) {
-    const rowGroups = commentRowMode ? remainingCommentGroups.slice(index, index + 2) : [remainingCommentGroups[index]];
-    const twoColumns = rowGroups.length > 1;
-    const firstWidth = twoColumns ? Math.floor((FULL_WIDTH - B5_COLUMN_GAP - 24) / 2) : FULL_WIDTH - 40;
-    const secondWidth = firstWidth;
+  for (let index = 0; index < remainingCommentGroups.length; index += 1) {
+    const rowGroups = [remainingCommentGroups[index]];
+    const firstWidth = FULL_WIDTH - 40;
 
     const blocks: DiaryRowBlock[] = rowGroups.map((comments, groupIndex) => {
-      const width = groupIndex === 0 ? firstWidth : secondWidth;
-      const x =
-        groupIndex === 0
-          ? B5_MARGIN_X + 20
-          : B5_MARGIN_X + 20 + firstWidth + B5_COLUMN_GAP;
+      const width = firstWidth;
+      const x = B5_MARGIN_X + 20;
 
       return {
         type: 'comment_group',

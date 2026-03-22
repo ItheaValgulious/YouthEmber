@@ -324,7 +324,7 @@ export function buildDiaryHtml(input: {
           }
 
           if (block.type === 'comment_group') {
-            const splitCards = block.layout === 'row' && block.comments.length > 1 && block.width >= 520;
+            const splitCards = block.layout === 'row' && block.comments.length === 2 && block.width >= 920;
             return `
               <article class="diary-view__block diary-comments is-${block.layout}${splitCards ? ' has-pair' : ''}" style="${renderDiaryBlockStyle(block)}">
                 ${block.comments
@@ -583,6 +583,8 @@ export function buildDiaryHtml(input: {
       .diary-photo {
         margin: 0;
         padding: 12px;
+        display: grid;
+        place-items: center;
         border-radius: 18px;
         background: rgba(255, 255, 255, 0.9);
         box-shadow: 0 14px 24px rgba(84, 61, 32, 0.12);
@@ -603,13 +605,15 @@ export function buildDiaryHtml(input: {
         width: 100%;
         height: 100%;
         display: block;
-        object-fit: cover;
+        object-fit: contain;
         border-radius: 12px;
+        background: rgba(244, 237, 222, 0.75);
       }
 
       .diary-comments {
         display: grid;
         gap: calc(12px * var(--diary-font-scale));
+        align-content: start;
       }
 
       .diary-comments.has-pair {

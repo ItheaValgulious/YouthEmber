@@ -57,6 +57,7 @@ let summaryCheckTimer: number | null = null;
 let bootstrapped = false;
 let persistTimer: number | null = null;
 let diaryBookTimer: number | null = null;
+let aiPumpRunning = false;
 let persistChain = Promise.resolve();
 let primedComposerAssets: AssetRecord[] = [];
 const imageSummaryCache = new Map<string, Promise<string>>();
@@ -960,7 +961,7 @@ function queueFriendJobs(event: EventRecord, trigger: FriendCommentTrigger = { k
   state.friends
     .filter((friend) => friend.enabled)
     .forEach((friend) => {
-      if (trigger.kind === 'comment' && trigger.sender && trigger.sender !== 'user' && friend.id === trigger.sender) {
+      if (trigger.kind === 'comment' && trigger.sender && friend.id === trigger.sender) {
         return;
       }
 
@@ -1512,11 +1513,11 @@ async function executeJob(job: PendingAiJob): Promise<void> {
         });
         await writeFriendMemory(friend, candidate.memory);
 
-        const probability = clamp(
-          friend.active * candidate.attitude * (sourceComment && sourceComment.sender !== 'user' ? friend.ai_active : 1),
-          0,
-          1,
-        );
+        const baseProbability = friend.active * candidate.attitude;
+        const probability =
+          sourceComment && sourceComment.sender !== 'user'
+            ? clamp(baseProbability, 0, 1) * friend.ai_active
+            : baseProbability;
         if (Math.random() > probability) {
           job.status = 'done';
           return;
@@ -1609,20 +1610,29 @@ async function executeJob(job: PendingAiJob): Promise<void> {
 }
 
 async function runDueAiJobs(): Promise<void> {
-  const now = Date.now();
-  const dueJobs = state.ai_jobs
-    .filter((job) => job.status === 'pending' && new Date(job.run_at).getTime() <= now)
-    .sort((left, right) => new Date(left.run_at).getTime() - new Date(right.run_at).getTime());
-
-  for (const job of dueJobs) {
-    await executeJob(job);
+  if (aiPumpRunning) {
+    return;
   }
 
-  state.ai_jobs = state.ai_jobs
-    .filter((job) => job.status === 'pending' || job.status === 'failed')
-    .slice(-20);
+  aiPumpRunning = true;
+  const now = Date.now();
+  try {
+    const dueJobs = state.ai_jobs
+      .filter((job) => job.status === 'pending' && new Date(job.run_at).getTime() <= now)
+      .sort((left, right) => new Date(left.run_at).getTime() - new Date(right.run_at).getTime())
+      .slice(0, 2);
 
-  scheduleAiPump();
+    for (const job of dueJobs) {
+      await executeJob(job);
+    }
+
+    state.ai_jobs = state.ai_jobs
+      .filter((job) => job.status === 'pending' || job.status === 'failed')
+      .slice(-20);
+  } finally {
+    aiPumpRunning = false;
+    scheduleAiPump();
+  }
 }
 
 function scheduleAiPump(): void {
