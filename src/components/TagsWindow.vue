@@ -2,18 +2,18 @@
   <ion-modal :is-open="open" @didDismiss="emit('cancel')">
     <ion-header translucent>
       <ion-toolbar>
-        <ion-title>{{ mode === 'create' ? '选择标签' : '筛选标签' }}</ion-title>
+        <ion-title>{{ title }}</ion-title>
         <ion-buttons slot="end">
-          <ion-button @click="emit('cancel')">取消</ion-button>
-          <ion-button @click="apply">确定</ion-button>
+          <ion-button @click="emit('cancel')">{{ ui.t('cancel') }}</ion-button>
+          <ion-button @click="apply">{{ ui.t('confirm') }}</ion-button>
         </ion-buttons>
       </ion-toolbar>
     </ion-header>
 
     <ion-content fullscreen>
       <div class="tags-window">
-        <section class="tags-window__selected">
-          <div class="section-title">已选择</div>
+        <section class="paper-sheet tags-window__selected">
+          <div class="section-title">{{ ui.t('selected') }}</div>
           <div v-if="selectedTags.length" class="tag-row">
             <button
               v-for="tag in selectedTags"
@@ -24,21 +24,21 @@
               {{ tag.label }}
             </button>
           </div>
-          <div v-else class="empty-note">还没有选中标签。</div>
+          <div v-else class="empty-note">{{ ui.t('no_selected_tags') }}</div>
         </section>
 
-        <section v-if="mode === 'create'" class="tags-window__location">
+        <section v-if="mode === 'create'" class="paper-sheet tags-window__location">
           <label class="row between">
-            <span class="section-title" style="margin: 0;">携带当前位置</span>
+            <span class="section-title tags-window__location-label">{{ ui.t('carry_location') }}</span>
             <input :checked="localLocationEnabled" type="checkbox" @change="toggleLocation" />
           </label>
           <div class="muted">
-            {{ currentLocationLabel || '未获取当前位置，提交时会再尝试一次。' }}
+            {{ currentLocationLabel || ui.t('current_location_missing') }}
           </div>
         </section>
 
         <section class="tags-window__body">
-          <div class="tags-window__categories">
+          <div class="paper-sheet tags-window__categories">
             <button
               v-for="category in visibleCategories"
               :key="category"
@@ -46,49 +46,47 @@
               :class="{ 'is-selected': activeCategory === category }"
               @click="selectCategory(category)"
             >
-              {{ categoryLabels[category] }}
+              {{ categoryLabel(category) }}
             </button>
           </div>
 
-          <div class="tags-window__list">
+          <div class="paper-sheet tags-window__list">
             <template v-if="mode === 'filter' && activeCategory === 'location'">
-              <div class="card-stack">
-                <div class="tags-window__filter-grid">
-                  <select class="native-select" :value="locationFilter.country" @change="updateLocationFilter('country', $event)">
-                    <option value="">国家</option>
-                    <option v-for="item in countryOptions" :key="item" :value="item">{{ item }}</option>
-                  </select>
-                  <select class="native-select" :value="locationFilter.province" @change="updateLocationFilter('province', $event)">
-                    <option value="">省份</option>
-                    <option v-for="item in provinceOptions" :key="item" :value="item">{{ item }}</option>
-                  </select>
-                  <select class="native-select" :value="locationFilter.city" @change="updateLocationFilter('city', $event)">
-                    <option value="">城市</option>
-                    <option v-for="item in cityOptions" :key="item" :value="item">{{ item }}</option>
-                  </select>
-                  <select class="native-select" :value="locationFilter.district" @change="updateLocationFilter('district', $event)">
-                    <option value="">区县</option>
-                    <option v-for="item in districtOptions" :key="item" :value="item">{{ item }}</option>
-                  </select>
-                </div>
-
-                <div v-if="filteredLocationTags.length" class="tag-row">
-                  <button
-                    v-for="tag in filteredLocationTags"
-                    :key="`${tag.type}:${tag.label}`"
-                    class="tag-chip"
-                    :class="{ 'is-selected': localSelectedKeys.includes(tagKey(tag)) }"
-                    @click="toggleTag(tag)"
-                  >
-                    {{ tag.label }}
-                  </button>
-                </div>
-                <div v-else class="empty-note">当前筛选条件下没有位置标签。</div>
+              <div class="tags-window__filter-grid">
+                <select class="native-select" :value="locationFilter.country" @change="updateLocationFilter('country', $event)">
+                  <option value="">{{ ui.t('country') }}</option>
+                  <option v-for="item in countryOptions" :key="item" :value="item">{{ item }}</option>
+                </select>
+                <select class="native-select" :value="locationFilter.province" @change="updateLocationFilter('province', $event)">
+                  <option value="">{{ ui.t('province') }}</option>
+                  <option v-for="item in provinceOptions" :key="item" :value="item">{{ item }}</option>
+                </select>
+                <select class="native-select" :value="locationFilter.city" @change="updateLocationFilter('city', $event)">
+                  <option value="">{{ ui.t('city') }}</option>
+                  <option v-for="item in cityOptions" :key="item" :value="item">{{ item }}</option>
+                </select>
+                <select class="native-select" :value="locationFilter.district" @change="updateLocationFilter('district', $event)">
+                  <option value="">{{ ui.t('district') }}</option>
+                  <option v-for="item in districtOptions" :key="item" :value="item">{{ item }}</option>
+                </select>
               </div>
+
+              <div v-if="filteredLocationTags.length" class="tag-row tags-window__tag-row">
+                <button
+                  v-for="tag in filteredLocationTags"
+                  :key="`${tag.type}:${tag.label}`"
+                  class="tag-chip"
+                  :class="{ 'is-selected': localSelectedKeys.includes(tagKey(tag)) }"
+                  @click="toggleTag(tag)"
+                >
+                  {{ tag.label }}
+                </button>
+              </div>
+              <div v-else class="empty-note">{{ ui.t('no_location_tags') }}</div>
             </template>
 
             <template v-else>
-              <div v-if="visibleTags.length" class="tag-row">
+              <div v-if="visibleTags.length" class="tag-row tags-window__tag-row">
                 <button
                   v-for="tag in visibleTags"
                   :key="`${tag.type}:${tag.label}`"
@@ -99,7 +97,7 @@
                   {{ tag.label }}
                 </button>
               </div>
-              <div v-else class="empty-note">当前分类还没有可选标签。</div>
+              <div v-else class="empty-note">{{ ui.t('no_tags_in_category') }}</div>
             </template>
           </div>
         </section>
@@ -120,6 +118,7 @@ import {
   IonToolbar,
 } from '@ionic/vue';
 
+import { useUiPreferences } from '../ui/preferences';
 import type { LocationPayload, Tag, TagType } from '../types/models';
 
 const props = withDefaults(
@@ -144,14 +143,9 @@ const emit = defineEmits<{
   apply: [payload: { selectedKeys: string[]; locationEnabled: boolean }];
 }>();
 
-const categoryLabels: Record<TagType, string> = {
-  nature: 'Nature',
-  mood: 'Mood',
-  others: 'Others',
-  people: 'People',
-  location: 'Location',
-};
+const ui = useUiPreferences();
 
+const title = computed(() => ui.t(props.mode === 'create' ? 'tags_title_create' : 'tags_title_filter'));
 const visibleCategories = computed<TagType[]>(() =>
   props.mode === 'create'
     ? ['nature', 'mood', 'others', 'people']
@@ -167,6 +161,10 @@ const locationFilter = reactive({
   city: '',
   district: '',
 });
+
+function categoryLabel(category: TagType): string {
+  return ui.t(category);
+}
 
 function tagKey(tag: Pick<Tag, 'type' | 'label'>): string {
   return `${tag.type}:${tag.label}`;
@@ -193,15 +191,12 @@ watch(
 );
 
 const plainTags = computed(() => props.tags.filter((tag) => !tag.system));
-
 const selectedTags = computed(() =>
   plainTags.value.filter((tag) => localSelectedKeys.value.includes(tagKey(tag))),
 );
-
 const visibleTags = computed(() =>
   plainTags.value.filter((tag) => tag.type === activeCategory.value),
 );
-
 const locationTags = computed(() => plainTags.value.filter((tag) => tag.type === 'location'));
 
 function readLocationField(payload: LocationPayload | null | undefined, field: keyof LocationPayload): string {
@@ -210,15 +205,17 @@ function readLocationField(payload: LocationPayload | null | undefined, field: k
 }
 
 function uniqueLocationValues(tags: Tag[], field: keyof LocationPayload): string[] {
-  return [...new Set(tags.map((tag) => readLocationField(tag.payload, field)).filter(Boolean))].sort((a, b) =>
-    a.localeCompare(b, 'zh-CN'),
+  return [...new Set(tags.map((tag) => readLocationField(tag.payload, field)).filter(Boolean))].sort((left, right) =>
+    left.localeCompare(right, 'zh-CN'),
   );
 }
 
 const countryOptions = computed(() => uniqueLocationValues(locationTags.value, 'country'));
 const provinceOptions = computed(() =>
   uniqueLocationValues(
-    locationTags.value.filter((tag) => !locationFilter.country || readLocationField(tag.payload, 'country') === locationFilter.country),
+    locationTags.value.filter(
+      (tag) => !locationFilter.country || readLocationField(tag.payload, 'country') === locationFilter.country,
+    ),
     'province',
   ),
 );
@@ -321,36 +318,46 @@ function apply(): void {
 <style scoped>
 .tags-window {
   display: grid;
-  gap: 14px;
+  gap: 18px;
   padding: 16px 14px calc(96px + env(safe-area-inset-bottom));
 }
 
 .tags-window__selected,
 .tags-window__location,
-.tags-window__list,
-.tags-window__categories {
-  border: 1px solid rgba(180, 139, 89, 0.45);
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.62);
-  padding: 14px;
+.tags-window__categories,
+.tags-window__list {
+  padding: 18px;
+}
+
+.tags-window__location-label {
+  margin: 0;
 }
 
 .tags-window__body {
   display: grid;
-  gap: 12px;
-  grid-template-columns: 108px minmax(0, 1fr);
+  gap: 14px;
+  grid-template-columns: 160px minmax(0, 1fr);
 }
 
 .tags-window__categories {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  overflow-y: auto;
+  gap: 10px;
 }
 
 .tags-window__category {
   white-space: nowrap;
   text-align: left;
+}
+
+.tags-window__list {
+  display: grid;
+  gap: 16px;
+  align-content: start;
+}
+
+.tags-window__tag-row {
+  align-items: flex-start;
 }
 
 .tags-window__filter-grid {
@@ -359,9 +366,14 @@ function apply(): void {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-@media (max-width: 640px) {
+@media (max-width: 680px) {
   .tags-window__body {
-    grid-template-columns: 88px minmax(0, 1fr);
+    grid-template-columns: 1fr;
+  }
+
+  .tags-window__categories {
+    flex-direction: row;
+    flex-wrap: wrap;
   }
 }
 </style>

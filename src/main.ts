@@ -5,6 +5,7 @@ import App from './App.vue';
 import router from './router';
 import { initializeAppStore } from './store/app-store';
 import { notificationService } from './services';
+import { initializeUiPreferences } from './ui/preferences';
 
 import '@ionic/vue/css/core.css';
 import '@ionic/vue/css/normalize.css';
@@ -22,7 +23,7 @@ const app = createApp(App);
 app.use(IonicVue);
 app.use(router);
 
-Promise.all([router.isReady(), initializeAppStore()]).then(() => {
+Promise.all([router.isReady(), initializeAppStore(), initializeUiPreferences()]).then(() => {
   void notificationService.initialize((taskId) => {
     router.push(`/event/${taskId}`);
   });

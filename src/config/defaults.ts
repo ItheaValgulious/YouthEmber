@@ -2,6 +2,21 @@ import type { AppConfig, FriendRecord, ModelRecord, Tag } from '../types/models'
 
 type FriendPreset = Omit<FriendRecord, 'model_id'>;
 
+export const DEFAULT_FRIEND_AI_ACTIVE = 0.1;
+
+function sanitizeFriendMemorySegment(value: string): string {
+  const clean = value
+    .trim()
+    .replace(/[^\w.-]+/g, '-')
+    .replace(/-{2,}/g, '-')
+    .replace(/^-|-$/g, '');
+  return clean || 'friend';
+}
+
+export function buildFriendMemoryPath(id: string): string {
+  return `friend-memories/${sanitizeFriendMemorySegment(id)}.txt`;
+}
+
 const DEFAULT_CONFIG_VALUES: Omit<AppConfig, 'timezone'> = {
   pre_alert: 2,
   alert_time: '09:00',
@@ -11,6 +26,8 @@ const DEFAULT_CONFIG_VALUES: Omit<AppConfig, 'timezone'> = {
   abstract_show_comment_count: 5,
   summary_intervals: ['7d', '3m', '1y'],
   page_margin: 24,
+  diary_paper_size: 'B5',
+  diary_font_scale: 1,
   mood_weights: {
     happy: 2.0,
     moved: 1.5,
@@ -19,7 +36,7 @@ const DEFAULT_CONFIG_VALUES: Omit<AppConfig, 'timezone'> = {
     hesitant: -1.0,
     upset: -2.0,
     boring: -1.0,
-    lonely: -2.0
+    lonely: -2.0,
   },
 };
 
@@ -28,33 +45,40 @@ export const DEFAULT_MODEL_PRESET: ModelRecord = {
   name: 'Primary AI Model',
   base_url: 'https://api.openai.com/v1',
   api_key: '',
+  img_dealing: true,
 };
 
 export const DEFAULT_FRIEND_PRESETS: FriendPreset[] = [
   {
     id: 'friend_fire',
     name: 'Fire',
+    memory_path: buildFriendMemoryPath('friend_fire'),
     soul: '温柔、稳定，会先肯定你的努力，再给轻一点的提醒。',
     system_prompt: '你是温柔的陪伴型朋友。',
     active: 2.0,
+    ai_active: DEFAULT_FRIEND_AI_ACTIVE,
     latency: 0.15,
     enabled: true,
   },
   {
     id: 'friend_ice',
     name: 'Ice',
+    memory_path: buildFriendMemoryPath('friend_ice'),
     soul: '偏理性，擅长把混乱的事情拆成下一步。',
     system_prompt: '你是理性且可靠的执行型朋友。',
     active: 1.0,
+    ai_active: DEFAULT_FRIEND_AI_ACTIVE,
     latency: 0.4,
     enabled: true,
   },
   {
     id: 'friend_Ithea',
     name: 'Ithea',
+    memory_path: buildFriendMemoryPath('friend_Ithea'),
     soul: '好奇、轻盈，偶尔会有一点诗意。',
     system_prompt: '你是善于发现亮点的灵感型朋友。',
     active: 2.0,
+    ai_active: DEFAULT_FRIEND_AI_ACTIVE,
     latency: 0.65,
     enabled: true,
   },
@@ -63,20 +87,16 @@ export const DEFAULT_FRIEND_PRESETS: FriendPreset[] = [
 export const DEFAULT_NEW_FRIEND_PRESET: FriendPreset = {
   id: 'friend_new',
   name: 'New Friend',
+  memory_path: buildFriendMemoryPath('friend_new'),
   soul: '一个等待补充性格设定的朋友。',
   system_prompt: '你是用户的陪伴型朋友。',
   active: 0.7,
+  ai_active: DEFAULT_FRIEND_AI_ACTIVE,
   latency: 0.35,
   enabled: true,
 };
 
-function tag(
-  id: string,
-  label: string,
-  type: Tag['type'],
-  rules: string,
-  system = false,
-): Tag {
+function tag(id: string, label: string, type: Tag['type'], rules: string, system = false): Tag {
   return {
     id,
     label,
@@ -137,6 +157,7 @@ export function createDefaultFriendDraft(
   return {
     ...DEFAULT_NEW_FRIEND_PRESET,
     id,
+    memory_path: buildFriendMemoryPath(id),
     model_id: defaultModelId,
   };
 }

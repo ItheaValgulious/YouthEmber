@@ -2,40 +2,46 @@
   <ion-page>
     <ion-header translucent>
       <ion-toolbar>
-        <ion-title>Event Flow</ion-title>
+        <ion-title>{{ ui.t('app_flow') }}</ion-title>
       </ion-toolbar>
     </ion-header>
 
     <ion-content fullscreen>
-      <div class="content-wrap">
-        <div class="section-title">筛选</div>
-        <ion-searchbar v-model="query" placeholder="搜索标题、正文或标签" />
-
-        <div class="flow-toolbar card-stack">
-          <div class="row wrap">
-            <ion-button fill="outline" @click="openTagsWindow">
-              标签筛选
-            </ion-button>
+      <div class="content-wrap content-wrap--wide desk-stack">
+        <section class="paper-sheet flow-toolbar">
+          <div class="flow-toolbar__header row between wrap">
+            <div>
+              <div class="ink-label handwritten">{{ ui.t('paper_trail') }}</div>
+              <h2 class="ink-title">{{ ui.t('daily_flow') }}</h2>
+            </div>
 
             <label class="flow-toolbar__date">
-              <span class="section-title" style="margin-bottom: 6px;">跳转日期</span>
+              <div class="section-title">{{ ui.t('jump_to_date') }}</div>
               <input v-model="jumpDate" class="native-input" type="date" @change="jumpToNearestDate" />
             </label>
           </div>
 
-          <div v-if="selectedFilterTags.length" class="tag-row">
-            <span
-              v-for="tag in selectedFilterTags"
-              :key="`${tag.type}:${tag.label}`"
-              class="tag-chip is-selected"
-            >
-              {{ tag.label }}
-            </span>
-          </div>
-        </div>
+          <div class="flow-toolbar__filters desk-stack">
+            <ion-searchbar v-model="query" :placeholder="ui.t('search_placeholder')" />
 
-        <div class="flow-timeline">
-          <section
+            <div class="row wrap">
+              <ion-button fill="outline" @click="openTagsWindow">{{ ui.t('filter_tags') }}</ion-button>
+            </div>
+
+            <div v-if="selectedFilterTags.length" class="tag-row">
+              <span
+                v-for="tag in selectedFilterTags"
+                :key="`${tag.type}:${tag.label}`"
+                class="tag-chip is-selected"
+              >
+                {{ tag.label }}
+              </span>
+            </div>
+          </div>
+        </section>
+
+        <section class="flow-timeline">
+          <article
             v-for="group in visibleDayGroups"
             :key="group.date"
             :ref="(element) => registerDayRef(group.date, element)"
@@ -43,10 +49,10 @@
           >
             <div class="flow-day__rail">
               <div class="flow-day__dot" />
-              <div class="flow-day__date">{{ group.date }}</div>
+              <div class="flow-day__date handwritten">{{ group.date }}</div>
             </div>
 
-            <div class="flow-day__cards card-stack">
+            <div class="flow-day__stack">
               <EventCard
                 v-for="event in group.events"
                 :key="event.id"
@@ -55,19 +61,19 @@
                 @fail="store.failTask"
               />
             </div>
-          </section>
+          </article>
 
           <div v-if="!filteredEvents.length" class="empty-note">
-            当前没有匹配到内容，试试清空关键词或标签筛选。
+            {{ ui.t('no_matching_entries') }}
           </div>
-        </div>
+        </section>
 
         <ion-infinite-scroll
           v-if="filteredEvents.length > visibleCount"
           threshold="120px"
           @ionInfinite="loadMore"
         >
-          <ion-infinite-scroll-content loading-spinner="bubbles" loading-text="继续加载事件…" />
+          <ion-infinite-scroll-content loading-spinner="bubbles" :loading-text="ui.t('loading_more_entries')" />
         </ion-infinite-scroll>
       </div>
     </ion-content>
@@ -105,11 +111,13 @@ import EventCard from '../components/EventCard.vue';
 import TagsWindow from '../components/TagsWindow.vue';
 import { locationService } from '../services';
 import { useAppStore } from '../store/app-store';
+import { useUiPreferences } from '../ui/preferences';
 
 const INITIAL_PAGE_SIZE = 16;
 const PAGE_SIZE = 12;
 
 const store = useAppStore();
+const ui = useUiPreferences();
 const query = ref('');
 const jumpDate = ref('');
 const selectedTagKeys = ref<string[]>([]);
@@ -250,8 +258,12 @@ function loadMore(event: CustomEvent): void {
 
 <style scoped>
 .flow-toolbar {
-  margin-top: 12px;
-  margin-bottom: 16px;
+  padding: 24px;
+}
+
+.flow-toolbar__header {
+  align-items: end;
+  gap: 18px;
 }
 
 .flow-toolbar__date {
@@ -259,78 +271,94 @@ function loadMore(event: CustomEvent): void {
   flex: 1 1 220px;
 }
 
+.flow-toolbar__filters {
+  margin-top: 18px;
+}
+
 .flow-timeline {
+  --flow-line-left: 115px;
   position: relative;
   display: grid;
-  gap: 16px;
+  gap: 18px;
 }
 
 .flow-day {
+  position: relative;
+  isolation: isolate;
   display: grid;
-  grid-template-columns: 112px minmax(0, 1fr);
-  gap: 14px;
+  grid-template-columns: 140px minmax(0, 1fr);
+  gap: 18px;
   align-items: start;
+}
+
+.flow-day::before {
+  content: '';
+  position: absolute;
+  top: 16px;
+  bottom: -18px;
+  left: var(--flow-line-left);
+  width: 2px;
+  border-radius: 999px;
+  background: rgba(116, 84, 51, 0.28);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.flow-day:last-of-type::before {
+  bottom: 0;
+  background: linear-gradient(180deg, rgba(116, 84, 51, 0.38), rgba(116, 84, 51, 0));
 }
 
 .flow-day__rail {
   position: sticky;
   top: 76px;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 10px;
-  min-height: 100%;
-}
-
-.flow-day__rail::after {
-  content: '';
-  position: absolute;
-  right: 14px;
-  top: 20px;
-  bottom: -24px;
-  width: 2px;
-  background: linear-gradient(180deg, rgba(122, 91, 62, 0.45), rgba(122, 91, 62, 0));
+  display: grid;
+  justify-items: end;
+  gap: 12px;
+  padding-right: 18px;
+  z-index: 1;
 }
 
 .flow-day__dot {
-  width: 12px;
-  height: 12px;
+  width: 13px;
+  height: 13px;
   border-radius: 999px;
-  background: #7a5b3e;
-  box-shadow: 0 0 0 4px rgba(122, 91, 62, 0.14);
+  background: #715338;
+  box-shadow: 0 0 0 6px rgba(113, 83, 56, 0.12);
   z-index: 1;
 }
 
 .flow-day__date {
-  padding-right: 24px;
-  color: #7b6247;
-  font-size: 13px;
-  font-weight: 700;
+  color: #6c5238;
+  font-size: clamp(1rem, 1.6vw, 1.22rem);
+  text-align: right;
 }
 
-.flow-day__cards {
-  min-width: 0;
+.flow-day__stack {
+  position: relative;
+  display: grid;
+  gap: 18px;
+  z-index: 1;
 }
 
-@media (max-width: 680px) {
+@media (max-width: 760px) {
+  .flow-timeline {
+    --flow-line-left: 25.5px;
+  }
+
   .flow-day {
     grid-template-columns: 1fr;
   }
 
   .flow-day__rail {
     position: static;
-    align-items: flex-start;
-    padding-left: 18px;
-  }
-
-  .flow-day__rail::after {
-    left: 5px;
-    right: auto;
+    justify-items: start;
+    padding-right: 0;
+    padding-left: 20px;
   }
 
   .flow-day__date {
-    padding-right: 0;
-    padding-left: 14px;
+    text-align: left;
   }
 }
 </style>

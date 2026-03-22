@@ -1,9 +1,14 @@
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
 
 import type { AssetRecord } from '../types/models';
+import { isNativePlatform } from './capacitor/runtime';
 import { fileService } from './file-service';
 
 async function requestImagePermissions(): Promise<void> {
+  if (!isNativePlatform()) {
+    return;
+  }
+
   const permissions = await Camera.checkPermissions();
 
   if (permissions.camera === 'granted' && permissions.photos === 'granted') {

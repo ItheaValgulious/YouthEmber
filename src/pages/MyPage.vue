@@ -2,17 +2,19 @@
   <ion-page>
     <ion-header translucent>
       <ion-toolbar>
-        <ion-title>My</ion-title>
+        <ion-title>{{ ui.t('app_my') }}</ion-title>
       </ion-toolbar>
     </ion-header>
 
     <ion-content fullscreen>
-      <div class="content-wrap card-stack">
-        <ion-card class="sketch-card">
-          <ion-card-header>
-            <ion-card-title>入口</ion-card-title>
-          </ion-card-header>
-          <ion-card-content>
+      <div class="content-wrap desk-stack">
+        <section class="paper-sheet paper-sheet--compact my-switcher">
+          <div class="my-switcher__inner">
+            <div>
+              <div class="ink-label handwritten">{{ ui.t('inside_notebook') }}</div>
+              <h2 class="ink-title">{{ ui.t('my_space') }}</h2>
+            </div>
+
             <div class="row wrap">
               <ion-button
                 v-for="panel in panels"
@@ -23,235 +25,257 @@
                 {{ panel.label }}
               </ion-button>
             </div>
-          </ion-card-content>
-        </ion-card>
-
-        <section v-if="store.state.last_opened_my_panel === 'mailbox'" class="card-stack">
-          <ion-card class="sketch-card">
-            <ion-card-header>
-              <ion-card-title>Mailbox</ion-card-title>
-            </ion-card-header>
-            <ion-card-content class="card-stack">
-              <div class="row wrap">
-                <ion-button fill="outline" @click="generateSummary('7d')">生成 7d</ion-button>
-                <ion-button fill="outline" @click="generateSummary('3m')">生成 3m</ion-button>
-                <ion-button fill="outline" @click="generateSummary('1y')">生成 1y</ion-button>
-              </div>
-
-              <ion-item
-                v-for="mail in store.sortedMails.value"
-                :key="mail.id"
-                button
-                detail
-                class="mail-list-button"
-                @click="openMail(mail.id)"
-              >
-                <ion-label>
-                  <h2>{{ mail.title }}</h2>
-                  <p>{{ store.formatDateTime(mail.time) }} · {{ mail.sender }}</p>
-                </ion-label>
-              </ion-item>
-
-              <div v-if="!store.sortedMails.value.length" class="empty-note">
-                还没有 Mail，先生成一封 Summary 试试。
-              </div>
-            </ion-card-content>
-          </ion-card>
+          </div>
         </section>
 
-        <section v-else-if="store.state.last_opened_my_panel === 'diary'" class="card-stack">
-          <ion-card class="sketch-card">
-            <ion-card-header>
-              <ion-card-title>Diary</ion-card-title>
-            </ion-card-header>
-            <ion-card-content class="card-stack">
-              <div v-for="(page, pageIndex) in store.diaryPages.value" :key="`page-${pageIndex}`" class="diary-page">
-                <div class="diary-page__number">Page {{ pageIndex + 1 }}</div>
-                <div v-for="group in page" :key="group.date" class="preview-card diary-page__day">
-                  <div class="section-title">{{ group.date }}</div>
-                  <div class="card-stack">
-                    <div
-                      v-for="event in group.events"
-                      :key="event.id"
-                      style="padding: 10px 12px; border-radius: 14px; background: rgba(255,255,255,0.6); border: 1px solid #ddc4a0;"
-                    >
-                      <strong>{{ event.title || '未命名记录' }}</strong>
-                      <div class="muted" style="margin-top: 4px;">
-                        {{ store.formatDateTime(store.effectiveTimeOf(event)) }}
-                      </div>
-                      <div style="margin-top: 8px; line-height: 1.6; white-space: pre-wrap;">
-                        {{ event.raw || '（无正文）' }}
-                      </div>
-                    </div>
+        <section v-if="store.state.last_opened_my_panel === 'mailbox'" class="paper-sheet my-panel">
+          <div class="my-panel__head row between wrap">
+            <div>
+              <div class="ink-label handwritten">{{ ui.t('collected_letters') }}</div>
+              <h2 class="ink-title">{{ ui.t('mailbox') }}</h2>
+            </div>
 
-                    <div
-                      v-for="summary in group.summaries"
-                      :key="summary.id"
-                      style="padding: 12px; border-radius: 14px; background: rgba(246,230,195,0.56); border: 1px dashed #ba9360;"
-                    >
-                      <div class="section-title" style="margin-bottom: 6px;">{{ summary.interval }} summary</div>
-                      <strong>{{ summary.title }}</strong>
-                      <div style="margin-top: 8px; line-height: 1.6;">
-                        {{ summary.summary }}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
+            <div class="row wrap">
+              <ion-button fill="outline" @click="generateSummary('7d')">
+                {{ ui.t('summary_interval_label', { interval: '7d' }) }}
+              </ion-button>
+              <ion-button fill="outline" @click="generateSummary('3m')">
+                {{ ui.t('summary_interval_label', { interval: '3m' }) }}
+              </ion-button>
+              <ion-button fill="outline" @click="generateSummary('1y')">
+                {{ ui.t('summary_interval_label', { interval: '1y' }) }}
+              </ion-button>
+            </div>
+          </div>
 
-              <div v-if="!store.diaryPages.value.length" class="empty-note">
-                Diary 还没有内容。
-              </div>
-            </ion-card-content>
-          </ion-card>
+          <div class="paper-stack">
+            <ion-item
+              v-for="mail in store.sortedMails.value"
+              :key="mail.id"
+              button
+              detail
+              class="mail-list-button my-mail-item"
+              @click="openMail(mail.id)"
+            >
+              <ion-label>
+                <h2>{{ mail.title }}</h2>
+                <p>{{ store.formatDateTime(mail.time) }} / {{ mail.sender }}</p>
+              </ion-label>
+            </ion-item>
+
+            <div v-if="!store.sortedMails.value.length" class="empty-note">
+              {{ ui.t('no_mail_yet') }}
+            </div>
+          </div>
         </section>
 
-        <section v-else-if="store.state.last_opened_my_panel === 'setting'" class="card-stack">
-          <ion-card class="sketch-card">
-            <ion-card-header>
-              <ion-card-title>Runtime</ion-card-title>
-            </ion-card-header>
-            <ion-card-content class="card-stack">
-              <div class="empty-note">
-                当前平台：{{ platformLabel }}<br />
-                存储驱动：{{ databaseService.driverLabel }}
-              </div>
-            </ion-card-content>
-          </ion-card>
+        <section v-else-if="store.state.last_opened_my_panel === 'diary'" class="my-diary-panel">
+          <DiaryBookView />
+        </section>
 
-          <ion-card class="sketch-card">
-            <ion-card-header>
-              <ion-card-title>Config</ion-card-title>
-            </ion-card-header>
-            <ion-card-content class="card-stack">
+        <section v-else-if="store.state.last_opened_my_panel === 'setting'" class="desk-stack">
+          <section class="paper-sheet my-panel">
+            <div class="my-panel__head">
+              <div class="ink-label handwritten">{{ ui.t('runtime') }}</div>
+              <h2 class="ink-title">{{ ui.t('environment') }}</h2>
+            </div>
+            <div class="empty-note">
+              {{ ui.t('platform') }}: {{ platformLabel }}<br />
+              {{ ui.t('storage') }}: {{ databaseService.driverLabel }}
+            </div>
+          </section>
+
+          <section class="paper-sheet my-panel">
+            <div class="my-panel__head">
+              <div class="ink-label handwritten">{{ ui.t('runtime_config') }}</div>
+              <h2 class="ink-title">{{ ui.t('runtime_config') }}</h2>
+            </div>
+
+            <div class="paper-stack">
               <label>
-                <div class="section-title">Pre Alert</div>
+                <div class="section-title">{{ ui.t('pre_alert') }}</div>
                 <input v-model.number="store.state.config.pre_alert" class="native-input" min="0" step="1" type="number" />
               </label>
               <label>
-                <div class="section-title">Alert Time</div>
+                <div class="section-title">{{ ui.t('alert_time') }}</div>
                 <input v-model="store.state.config.alert_time" class="native-input" type="time" />
               </label>
               <label>
-                <div class="section-title">Token</div>
-                <input v-model="store.state.token" class="native-input" placeholder="future sync token" />
+                <div class="section-title">{{ ui.t('token') }}</div>
+                <input v-model="store.state.token" class="native-input" :placeholder="ui.t('future_sync_token')" />
               </label>
-            </ion-card-content>
-          </ion-card>
+            </div>
+          </section>
 
-          <ion-card class="sketch-card">
-            <ion-card-header>
-              <div class="row between">
-                <ion-card-title>Models</ion-card-title>
-                <ion-button fill="outline" size="small" @click="handleAddModel">新增</ion-button>
-              </div>
-            </ion-card-header>
-            <ion-card-content class="card-stack">
-              <div class="empty-note">
-                标题、tag、Summary、tag arrange 默认使用列表中的首个可用模型；`id` 会直接作为请求里的 model 标识。
-              </div>
+          <section class="paper-sheet my-panel">
+            <div class="my-panel__head">
+              <div class="ink-label handwritten">{{ ui.t('appearance') }}</div>
+              <h2 class="ink-title">{{ ui.t('appearance') }}</h2>
+            </div>
 
-              <div
-                v-for="(model, index) in modelDrafts"
-                :key="model.ui_key"
-                class="preview-card"
-                style="padding: 12px;"
-              >
-                <div class="card-stack">
-                  <input
-                    :value="model.name"
-                    class="native-input"
-                    placeholder="name"
-                    @input="updateModelField(index, 'name', readText($event))"
-                    @blur="commitModel(index)"
-                  />
-                  <input
-                    :value="model.id"
-                    class="native-input"
-                    placeholder="id"
-                    @input="updateModelField(index, 'id', readText($event))"
-                    @blur="commitModel(index)"
-                  />
-                  <input
-                    :value="model.base_url"
-                    class="native-input"
-                    placeholder="base_url"
-                    @input="updateModelField(index, 'base_url', readText($event))"
-                    @blur="commitModel(index)"
-                  />
-                  <input
-                    :value="model.api_key"
-                    class="native-input"
-                    placeholder="api_key"
-                    @input="updateModelField(index, 'api_key', readText($event))"
-                    @blur="commitModel(index)"
-                  />
+            <div class="paper-stack">
+              <label>
+                <div class="section-title">{{ ui.t('language') }}</div>
+                <select :value="ui.state.locale" class="native-select" @change="handleLocaleChange">
+                  <option value="zh-CN">中文</option>
+                  <option value="en">English</option>
+                </select>
+              </label>
+              <label>
+                <div class="section-title">{{ ui.t('paper_theme') }}</div>
+                <select :value="ui.state.paperTheme" class="native-select" @change="handlePaperThemeChange">
+                  <option value="plain-paper">{{ ui.t('plain_paper') }}</option>
+                  <option value="warm-scrapbook">{{ ui.t('warm_scrapbook') }}</option>
+                  <option value="ink-studio">{{ ui.t('ink_studio') }}</option>
+                </select>
+              </label>
+              <label>
+                <div class="section-title">{{ ui.t('diary_paper_size') }}</div>
+                <select v-model="store.state.config.diary_paper_size" class="native-select">
+                  <option value="B5">{{ ui.t('b5_paper') }}</option>
+                  <option value="B6">{{ ui.state.locale === 'zh-CN' ? 'B6 竖版' : 'B6 portrait' }}</option>
+                </select>
+              </label>
+              <label>
+                <div class="section-title">{{ ui.state.locale === 'zh-CN' ? '日记字号' : 'Diary font size' }}</div>
+                <select v-model.number="store.state.config.diary_font_scale" class="native-select">
+                  <option v-for="option in diaryFontOptions" :key="option.value" :value="option.value">
+                    {{ option.label }}
+                  </option>
+                </select>
+              </label>
+            </div>
+          </section>
+
+          <section class="paper-sheet my-panel">
+            <div class="my-panel__head row between wrap">
+              <div>
+                <div class="ink-label handwritten">{{ ui.t('model_list') }}</div>
+                <h2 class="ink-title">{{ ui.t('model_list') }}</h2>
+              </div>
+              <ion-button fill="outline" size="small" @click="handleAddModel">{{ ui.t('add_model') }}</ion-button>
+            </div>
+
+            <div class="paper-stack">
+              <div class="empty-note">{{ ui.t('model_hint') }}</div>
+
+              <div v-for="(model, index) in modelDrafts" :key="model.ui_key" class="preview-card my-config-card">
+                <div class="paper-stack">
+                  <label>
+                    <div class="section-title">{{ ui.t('name') }}</div>
+                    <input
+                      :value="model.name"
+                      class="native-input"
+                      :placeholder="ui.t('model_name_placeholder')"
+                      @input="updateModelField(index, 'name', readText($event))"
+                      @blur="commitModel(index)"
+                    />
+                  </label>
+                  <label>
+                    <div class="section-title">{{ ui.t('identifier') }}</div>
+                    <input
+                      :value="model.id"
+                      class="native-input"
+                      :placeholder="ui.t('model_id_placeholder')"
+                      @input="updateModelField(index, 'id', readText($event))"
+                      @blur="commitModel(index)"
+                    />
+                  </label>
+                  <label>
+                    <div class="section-title">{{ ui.t('base_url') }}</div>
+                    <input
+                      :value="model.base_url"
+                      class="native-input"
+                      :placeholder="ui.t('base_url_placeholder')"
+                      @input="updateModelField(index, 'base_url', readText($event))"
+                      @blur="commitModel(index)"
+                    />
+                  </label>
+                  <label>
+                    <div class="section-title">{{ ui.t('api_key') }}</div>
+                    <input
+                      :value="model.api_key"
+                      class="native-input"
+                      :placeholder="ui.t('api_key_placeholder')"
+                      @input="updateModelField(index, 'api_key', readText($event))"
+                      @blur="commitModel(index)"
+                    />
+                  </label>
+                  <label class="row between">
+                    <strong>{{ ui.t('img_dealing') }}</strong>
+                    <input :checked="model.img_dealing" type="checkbox" @change="updateModelImageDealing(index, $event)" />
+                  </label>
                   <ion-button color="danger" fill="clear" size="small" @click="handleRemoveModel(index)">
-                    删除
+                    {{ ui.t('remove') }}
                   </ion-button>
                 </div>
               </div>
-            </ion-card-content>
-          </ion-card>
+            </div>
+          </section>
 
-          <ion-card class="sketch-card">
-            <ion-card-header>
-              <div class="row between">
-                <ion-card-title>Friends</ion-card-title>
-                <ion-button fill="outline" size="small" @click="handleAddFriend">新增</ion-button>
+          <section class="paper-sheet my-panel">
+            <div class="my-panel__head row between wrap">
+              <div>
+                <div class="ink-label handwritten">{{ ui.t('friend_roster') }}</div>
+                <h2 class="ink-title">{{ ui.t('friend_roster') }}</h2>
               </div>
-            </ion-card-header>
-            <ion-card-content class="card-stack">
-              <div
-                v-for="(friend, index) in friendDrafts"
-                :key="friend.ui_key"
-                class="preview-card"
-                style="padding: 12px;"
-              >
-                <div class="card-stack">
+              <ion-button fill="outline" size="small" @click="handleAddFriend">{{ ui.t('add_friend') }}</ion-button>
+            </div>
+
+            <div class="paper-stack">
+              <div v-for="(friend, index) in friendDrafts" :key="friend.ui_key" class="preview-card my-config-card">
+                <div class="paper-stack">
                   <label class="row between">
-                    <strong>启用</strong>
+                    <strong>{{ ui.t('enabled') }}</strong>
                     <input :checked="friend.enabled" type="checkbox" @change="updateFriendEnabled(index, $event)" />
                   </label>
-                  <input
-                    :value="friend.name"
-                    class="native-input"
-                    placeholder="name"
-                    @input="updateFriendField(index, 'name', readText($event))"
-                    @blur="commitFriend(index)"
-                  />
-                  <input
-                    :value="friend.id"
-                    class="native-input"
-                    placeholder="id"
-                    @input="updateFriendField(index, 'id', readText($event))"
-                    @blur="commitFriend(index)"
-                  />
-                  <select
-                    :value="friend.model_id"
-                    class="native-select"
-                    @change="updateFriendModel(index, $event)"
-                  >
-                    <option v-for="model in store.state.models" :key="model.id" :value="model.id">
-                      {{ model.name }} · {{ model.id }}
-                    </option>
-                  </select>
-                  <textarea
-                    :value="friend.soul"
-                    class="native-textarea"
-                    placeholder="soul"
-                    @input="updateFriendField(index, 'soul', readText($event))"
-                    @blur="commitFriend(index)"
-                  />
-                  <textarea
-                    :value="friend.system_prompt"
-                    class="native-textarea"
-                    placeholder="system_prompt"
-                    @input="updateFriendField(index, 'system_prompt', readText($event))"
-                    @blur="commitFriend(index)"
-                  />
                   <label>
-                    <div class="section-title">active</div>
+                    <div class="section-title">{{ ui.t('name') }}</div>
+                    <input
+                      :value="friend.name"
+                      class="native-input"
+                      @input="updateFriendField(index, 'name', readText($event))"
+                      @blur="commitFriend(index)"
+                    />
+                  </label>
+                  <label>
+                    <div class="section-title">{{ ui.t('identifier') }}</div>
+                    <input
+                      :value="friend.id"
+                      class="native-input"
+                      @input="updateFriendField(index, 'id', readText($event))"
+                      @blur="commitFriend(index)"
+                    />
+                  </label>
+                  <label>
+                    <div class="section-title">{{ ui.t('model_list') }}</div>
+                    <select :value="friend.model_id" class="native-select" @change="updateFriendModel(index, $event)">
+                      <option v-for="model in store.state.models" :key="model.id" :value="model.id">
+                        {{ model.name }} / {{ model.id }}
+                      </option>
+                    </select>
+                  </label>
+                  <div class="muted">{{ ui.t('memory_file') }}: {{ friend.memory_path }}</div>
+                  <label>
+                    <div class="section-title">{{ ui.t('soul') }}</div>
+                    <textarea
+                      :value="friend.soul"
+                      class="native-textarea"
+                      @input="updateFriendField(index, 'soul', readText($event))"
+                      @blur="commitFriend(index)"
+                    />
+                  </label>
+                  <label>
+                    <div class="section-title">{{ ui.t('system_prompt') }}</div>
+                    <textarea
+                      :value="friend.system_prompt"
+                      class="native-textarea"
+                      @input="updateFriendField(index, 'system_prompt', readText($event))"
+                      @blur="commitFriend(index)"
+                    />
+                  </label>
+                  <label>
+                    <div class="section-title">{{ ui.t('active') }}</div>
                     <input
                       :value="friend.active"
                       class="native-input"
@@ -264,7 +288,20 @@
                     />
                   </label>
                   <label>
-                    <div class="section-title">latency</div>
+                    <div class="section-title">{{ ui.t('ai_active') }}</div>
+                    <input
+                      :value="friend.ai_active"
+                      class="native-input"
+                      max="1"
+                      min="0"
+                      step="0.05"
+                      type="number"
+                      @input="updateFriendNumber(index, 'ai_active', $event)"
+                      @blur="commitFriend(index)"
+                    />
+                  </label>
+                  <label>
+                    <div class="section-title">{{ ui.t('latency') }}</div>
                     <input
                       :value="friend.latency"
                       class="native-input"
@@ -277,31 +314,39 @@
                     />
                   </label>
                   <ion-button color="danger" fill="clear" size="small" @click="handleRemoveFriend(index)">
-                    删除
+                    {{ ui.t('remove') }}
                   </ion-button>
                 </div>
               </div>
-            </ion-card-content>
-          </ion-card>
+            </div>
+          </section>
         </section>
 
-        <section v-else class="card-stack">
-          <ion-card class="sketch-card">
-            <ion-card-header>
-              <ion-card-title>Data</ion-card-title>
-            </ion-card-header>
-            <ion-card-content class="card-stack">
-              <ion-button :disabled="busy" @click="runAction(() => store.exportJsonSnapshot())">Export Json</ion-button>
-              <ion-button fill="outline" :disabled="busy" @click="importInput?.click()">Import Json</ion-button>
-              <ion-button fill="outline" :disabled="busy" @click="runAction(() => store.exportDiaryHtml())">Export Diary</ion-button>
-              <ion-button fill="outline" :disabled="busy" @click="runAction(() => store.exportMailsHtml())">Export Mails</ion-button>
-              <input ref="importInput" hidden accept="application/json" type="file" @change="handleImport" />
+        <section v-else class="paper-sheet my-panel">
+          <div class="my-panel__head">
+            <div class="ink-label handwritten">{{ ui.t('data_desk') }}</div>
+            <h2 class="ink-title">{{ ui.t('import_export') }}</h2>
+          </div>
 
-              <div class="empty-note">
-                当前本地共有 {{ store.sortedEvents.value.length }} 条 Event、{{ store.sortedMails.value.length }} 封 Mail。
-              </div>
-            </ion-card-content>
-          </ion-card>
+          <div class="paper-stack">
+            <div class="row wrap">
+              <ion-button :disabled="busy" @click="runAction(() => store.exportJsonSnapshot())">{{ ui.t('export_json') }}</ion-button>
+              <ion-button fill="outline" :disabled="busy" @click="importInput?.click()">{{ ui.t('import_json') }}</ion-button>
+              <ion-button fill="outline" :disabled="busy" @click="runAction(() => store.exportDiaryHtml())">
+                {{ ui.t('export_diary') }}
+              </ion-button>
+              <ion-button fill="outline" :disabled="busy" @click="runAction(() => store.exportMailsHtml())">
+                {{ ui.t('export_mails') }}
+              </ion-button>
+            </div>
+
+            <input ref="importInput" hidden accept="application/json" type="file" @change="handleImport" />
+
+            <div class="empty-note">
+              {{ ui.t('events_count') }}: {{ store.sortedEvents.value.length }}<br />
+              {{ ui.t('mails_count') }}: {{ store.sortedMails.value.length }}
+            </div>
+          </div>
         </section>
       </div>
     </ion-content>
@@ -313,10 +358,6 @@ import { computed, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import {
   IonButton,
-  IonCard,
-  IonCardContent,
-  IonCardHeader,
-  IonCardTitle,
   IonContent,
   IonHeader,
   IonItem,
@@ -326,8 +367,10 @@ import {
   IonToolbar,
 } from '@ionic/vue';
 
+import DiaryBookView from '../components/DiaryBookView.vue';
 import { databaseService, getCapacitorPlatform, isNativePlatform } from '../services';
 import { useAppStore } from '../store/app-store';
+import { useUiPreferences, type PaperThemeId, type UiLocale } from '../ui/preferences';
 import type { FriendRecord, ModelRecord, MyPanel, SummaryInterval } from '../types/models';
 
 interface ModelDraft extends ModelRecord {
@@ -340,17 +383,12 @@ interface FriendDraft extends FriendRecord {
 
 const router = useRouter();
 const store = useAppStore();
+const ui = useUiPreferences();
+
 const importInput = ref<HTMLInputElement | null>(null);
 const busy = ref(false);
 const modelDrafts = ref<ModelDraft[]>([]);
 const friendDrafts = ref<FriendDraft[]>([]);
-
-const panels: Array<{ key: MyPanel; label: string }> = [
-  { key: 'mailbox', label: 'Mailbox' },
-  { key: 'diary', label: 'Diary Page' },
-  { key: 'setting', label: 'Setting' },
-  { key: 'data', label: 'Data' },
-];
 
 function randomUiKey(prefix: string): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
@@ -390,9 +428,26 @@ watch(
   { immediate: true },
 );
 
+const panels = computed<Array<{ key: MyPanel; label: string }>>(() => [
+  { key: 'mailbox', label: ui.t('mailbox') },
+  { key: 'diary', label: ui.t('diary') },
+  { key: 'setting', label: ui.t('setting') },
+  { key: 'data', label: ui.t('data') },
+]);
+
 const platformLabel = computed(() => {
   const platform = getCapacitorPlatform();
-  return isNativePlatform() ? `${platform}（Native）` : `${platform}（Web fallback）`;
+  return `${platform} (${ui.t(isNativePlatform() ? 'native_runtime' : 'web_runtime')})`;
+});
+
+const diaryFontOptions = computed(() => {
+  const zh = ui.state.locale === 'zh-CN';
+  return [
+    { value: 0.9, label: zh ? '偏小 90%' : 'Smaller 90%' },
+    { value: 1, label: zh ? '默认 100%' : 'Default 100%' },
+    { value: 1.1, label: zh ? '偏大 110%' : 'Larger 110%' },
+    { value: 1.2, label: zh ? '更大 120%' : 'Largest 120%' },
+  ];
 });
 
 function readText(event: Event): string {
@@ -410,13 +465,23 @@ function readNumber(event: Event): number {
   return Number.isFinite(value) ? value : 0;
 }
 
-function updateModelField(index: number, field: keyof ModelRecord, value: string): void {
+function updateModelField(index: number, field: 'name' | 'id' | 'base_url' | 'api_key', value: string): void {
   const draft = modelDrafts.value[index];
   if (!draft) {
     return;
   }
 
   draft[field] = value;
+}
+
+function updateModelImageDealing(index: number, event: Event): void {
+  const draft = modelDrafts.value[index];
+  if (!draft) {
+    return;
+  }
+
+  draft.img_dealing = readChecked(event);
+  commitModel(index);
 }
 
 function commitModel(index: number): void {
@@ -430,6 +495,7 @@ function commitModel(index: number): void {
   target.id = draft.id.trim();
   target.base_url = draft.base_url.trim();
   target.api_key = draft.api_key.trim();
+  target.img_dealing = draft.img_dealing;
 }
 
 function updateFriendField(index: number, field: 'name' | 'id' | 'soul' | 'system_prompt', value: string): void {
@@ -441,7 +507,7 @@ function updateFriendField(index: number, field: 'name' | 'id' | 'soul' | 'syste
   draft[field] = value;
 }
 
-function updateFriendNumber(index: number, field: 'active' | 'latency', event: Event): void {
+function updateFriendNumber(index: number, field: 'active' | 'ai_active' | 'latency', event: Event): void {
   const draft = friendDrafts.value[index];
   if (!draft) {
     return;
@@ -484,6 +550,7 @@ function commitFriend(index: number): void {
   target.soul = draft.soul.trim();
   target.system_prompt = draft.system_prompt.trim();
   target.active = draft.active;
+  target.ai_active = draft.ai_active;
   target.latency = draft.latency;
 }
 
@@ -513,6 +580,20 @@ function handleRemoveFriend(index: number): void {
   store.removeFriend(target.id);
 }
 
+function handleLocaleChange(event: Event): void {
+  const locale = readText(event) as UiLocale;
+  if (locale === 'zh-CN' || locale === 'en') {
+    void ui.setLocale(locale);
+  }
+}
+
+function handlePaperThemeChange(event: Event): void {
+  const theme = readText(event) as PaperThemeId;
+  if (theme === 'plain-paper' || theme === 'warm-scrapbook' || theme === 'ink-studio') {
+    void ui.setPaperTheme(theme);
+  }
+}
+
 function openMail(id: string): void {
   router.push(`/mail/${id}`);
 }
@@ -526,7 +607,7 @@ async function runAction(task: () => Promise<void>): Promise<void> {
   try {
     await task();
   } catch (error) {
-    window.alert(error instanceof Error ? error.message : '操作失败');
+    window.alert(error instanceof Error ? error.message : ui.t('data_desk'));
   } finally {
     busy.value = false;
   }
@@ -543,7 +624,7 @@ async function handleImport(domEvent: Event): Promise<void> {
   try {
     await store.importJsonSnapshot(await file.text());
   } catch (error) {
-    window.alert(error instanceof Error ? error.message : '导入失败');
+    window.alert(error instanceof Error ? error.message : ui.t('import_json'));
   } finally {
     if (input) {
       input.value = '';
@@ -554,22 +635,40 @@ async function handleImport(domEvent: Event): Promise<void> {
 </script>
 
 <style scoped>
-.diary-page {
+.my-switcher {
+  padding: 24px;
+}
+
+.my-switcher__inner {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: center;
+}
+
+.my-panel {
+  padding: 24px;
+}
+
+.my-panel__head {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+
+.my-mail-item {
+  --background: rgba(255, 251, 243, 0.66);
+  margin-bottom: 10px;
+}
+
+.my-config-card {
   padding: 16px;
-  border-radius: 20px;
-  background: rgba(255, 250, 240, 0.88);
-  border: 2px solid rgba(95, 73, 48, 0.22);
-  box-shadow: 6px 6px 0 rgba(95, 73, 48, 0.1);
+  transform: none;
 }
 
-.diary-page__number {
-  text-align: right;
-  color: #8a6a45;
-  font-size: 12px;
-  margin-bottom: 12px;
-}
-
-.diary-page__day {
-  padding: 12px;
+.my-diary-panel {
+  display: grid;
+  gap: 18px;
 }
 </style>
