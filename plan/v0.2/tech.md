@@ -1,0 +1,22 @@
+# 技术栈
+
+- 平台：Capacitor，移动端原生优先，同时保留 Web fallback
+- 前端：Vue 3 + Ionic + Vite
+- 本地业务数据存储：
+  - Native: SQLite 作为 KV 后端
+  - Web: Capacitor Preferences
+- 资源文件存储：Filesystem 插件，写入应用数据目录
+- Friend 记忆存储：Filesystem 文本文件
+- 设备能力：
+  - Camera
+  - Filesystem
+  - Geolocation
+  - Local Notifications
+- AI 接入：可配置的 OpenAI-compatible Chat Completions 接口
+- Summary / Mail 渲染：HTML + 内联 JavaScript + Canvas + iframe / WebView
+- Diary 预览与导出：自定义布局引擎 + HTML 导出
+- 导入导出：
+  - JSON bundle
+  - Diary HTML
+  - Mail HTML
+- 服务端同步：本版不做，`token` 仅为后续预留
