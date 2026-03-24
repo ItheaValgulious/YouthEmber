@@ -2,6 +2,12 @@ import type { AppConfig, FriendRecord, ModelRecord, Tag } from '../types/models'
 
 type FriendPreset = Omit<FriendRecord, 'model_id'>;
 
+const DEFAULT_FRIEND_MODEL_IDS: Record<string, string> = {
+  friend_ice: 'deepseek-r1',
+  friend_fire: 'deepseek-v3',
+  friend_Ithea: 'deepseek-v3',
+};
+
 export const DEFAULT_FRIEND_AI_ACTIVE = 0.1;
 
 function sanitizeFriendMemorySegment(value: string): string {
@@ -41,11 +47,8 @@ const DEFAULT_CONFIG_VALUES: Omit<AppConfig, 'timezone'> = {
 };
 
 export const DEFAULT_MODEL_PRESET: ModelRecord = {
-  id: 'your-model-id',
-  name: 'Primary AI Model',
-  base_url: 'https://api.openai.com/v1',
-  api_key: '',
-  img_dealing: true,
+  id: '',
+  name: '',
 };
 
 export const DEFAULT_FRIEND_PRESETS: FriendPreset[] = [
@@ -140,13 +143,35 @@ export function createDefaultTags(): Tag[] {
 }
 
 export function createDefaultModels(): ModelRecord[] {
-  return [{ ...DEFAULT_MODEL_PRESET }];
+  return [];
 }
 
-export function createDefaultFriends(defaultModelId = DEFAULT_MODEL_PRESET.id): FriendRecord[] {
+export function resolveDefaultFriendModelId(
+  friendId: string,
+  availableModels: Array<Pick<ModelRecord, 'id'>> = [],
+  fallbackModelId = DEFAULT_MODEL_PRESET.id,
+): string {
+  const preferredModelId = DEFAULT_FRIEND_MODEL_IDS[friendId];
+  if (preferredModelId) {
+    if (!availableModels.length || availableModels.some((model) => model.id === preferredModelId)) {
+      return preferredModelId;
+    }
+  }
+
+  if (fallbackModelId && (!availableModels.length || availableModels.some((model) => model.id === fallbackModelId))) {
+    return fallbackModelId;
+  }
+
+  return availableModels[0]?.id ?? '';
+}
+
+export function createDefaultFriends(
+  defaultModelId = DEFAULT_MODEL_PRESET.id,
+  availableModels: Array<Pick<ModelRecord, 'id'>> = [],
+): FriendRecord[] {
   return DEFAULT_FRIEND_PRESETS.map((preset) => ({
     ...preset,
-    model_id: defaultModelId,
+    model_id: resolveDefaultFriendModelId(preset.id, availableModels, defaultModelId),
   }));
 }
 

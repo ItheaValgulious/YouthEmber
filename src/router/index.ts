@@ -1,12 +1,15 @@
 import { createRouter, createWebHistory } from '@ionic/vue-router';
 
+import { isAuthGateBootstrapped, isAuthGateSkippedForSession } from '../auth/auth-gate';
 import AppTabs from '../layouts/AppTabs.vue';
+import AuthGatePage from '../pages/AuthGatePage.vue';
 import EventDetailPage from '../pages/EventDetailPage.vue';
 import EventFlowPage from '../pages/EventFlowPage.vue';
 import MailDetailPage from '../pages/MailDetailPage.vue';
 import MyPage from '../pages/MyPage.vue';
 import NewPage from '../pages/NewPage.vue';
 import TasksPage from '../pages/TasksPage.vue';
+import { useAppStore } from '../store/app-store';
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -42,6 +45,10 @@ const router = createRouter({
       ],
     },
     {
+      path: '/auth',
+      component: AuthGatePage,
+    },
+    {
       path: '/event/:id',
       component: EventDetailPage,
     },
@@ -50,6 +57,25 @@ const router = createRouter({
       component: MailDetailPage,
     },
   ],
+});
+
+router.beforeEach((to) => {
+  if (!isAuthGateBootstrapped()) {
+    return true;
+  }
+
+  const store = useAppStore();
+  const hasSession = store.hasActiveSession();
+
+  if (to.path === '/auth') {
+    return hasSession ? '/tabs/flow' : true;
+  }
+
+  if (!hasSession && !isAuthGateSkippedForSession()) {
+    return '/auth';
+  }
+
+  return true;
 });
 
 export default router;

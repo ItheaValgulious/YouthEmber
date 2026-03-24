@@ -2,8 +2,10 @@ import { createApp } from 'vue';
 import { IonicVue } from '@ionic/vue';
 
 import App from './App.vue';
+import { markAuthGateBootstrapped } from './auth/auth-gate';
 import router from './router';
 import { initializeAppStore } from './store/app-store';
+import { useAppStore } from './store/app-store';
 import { notificationService } from './services';
 import { initializeUiPreferences } from './ui/preferences';
 
@@ -23,11 +25,25 @@ const app = createApp(App);
 app.use(IonicVue);
 app.use(router);
 
-Promise.all([router.isReady(), initializeAppStore(), initializeUiPreferences()]).then(() => {
+async function bootstrap(): Promise<void> {
+  await Promise.all([router.isReady(), initializeAppStore(), initializeUiPreferences()]);
+  markAuthGateBootstrapped();
+
+  const hasSession = useAppStore().hasActiveSession();
+  const currentPath = router.currentRoute.value.path;
+
+  if (hasSession && currentPath === '/auth') {
+    await router.replace('/tabs/flow');
+  } else if (!hasSession && currentPath !== '/auth') {
+    await router.replace('/auth');
+  }
+
   void notificationService.initialize((taskId) => {
     router.push(`/event/${taskId}`);
   });
   app.mount('#app');
-}).catch((error) => {
+}
+
+bootstrap().catch((error) => {
   console.error('Application bootstrap failed.', error);
 });

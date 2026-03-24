@@ -6,3 +6,11 @@ dist
 coverage
 .codex-*
 playwright-artifacts*/
+server/.venv
+server/.env.local
+server/config/models.local.json
+server/data/*.db
+server/data/*.sqlite
+server/data/*.sqlite3
+server/data/__pycache__/
+server/app/__pycache__/

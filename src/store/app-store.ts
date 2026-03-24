@@ -8,13 +8,14 @@ import {
   createDefaultFriends,
   createDefaultModels,
   createDefaultTags,
+  resolveDefaultFriendModelId,
 } from '../config/defaults';
 import { addDays, compareIsoDesc, diffDays, endOfDay, formatDateTime, toDateKey } from '../lib/date';
 import { buildDiaryBook, getDiaryBookVersion } from '../lib/diary-book';
 import { buildDiaryHtml, buildMailBundleHtml, buildSummaryMailHtml } from '../lib/exporters';
 import { dedupeTags, hasTagLabel, mergeTagCatalog, normalizeLabel, sortTagsForDisplay } from '../lib/tag';
-import { aiService, databaseService, fileService, notificationService } from '../services';
-import type { AiTagDraft } from '../services/ai-service';
+import { aiService, databaseService, fileService, notificationService, serverService, ServerError } from '../services';
+import type { AiTagDraft, SummaryGenerationInput, SummaryGenerationResult } from '../services/ai-service';
 import { restoreUiPreferences, snapshotUiPreferences, t as uiText, type UiPreferencesSnapshot } from '../ui/preferences';
 import type {
   AppState,
@@ -30,6 +31,8 @@ import type {
   ModelRecord,
   MyPanel,
   PendingAiJob,
+  RemoteTaskStatus,
+  RunnableAiJobStatus,
   SummaryInterval,
   SummaryRecord,
   Tag,
@@ -38,8 +41,10 @@ import type {
 
 const LEGACY_STORAGE_KEY = 'ashdairy.state.v1';
 const RETRY_DELAYS = [60_000, 5 * 60_000, 10 * 60_000];
+const REMOTE_POLL_INTERVAL_MS = 2_000;
 const DEMO_DELAY_UNIT_MS = 120;
 const FRIEND_MEMORY_MAX_CHARS = 100_000;
+const PRIMARY_MODEL_PREFERENCES = ['deepseek-v3', 'deepseek-r1', 'qwen3vl'];
 const SUMMARY_WINDOWS: Record<SummaryInterval, number> = {
   '7d': 7,
   '3m': 90,
@@ -55,12 +60,10 @@ let aiTimer: number | null = null;
 let taskDeadlineTimer: number | null = null;
 let summaryCheckTimer: number | null = null;
 let bootstrapped = false;
-let persistTimer: number | null = null;
 let diaryBookTimer: number | null = null;
 let aiPumpRunning = false;
 let persistChain = Promise.resolve();
 let primedComposerAssets: AssetRecord[] = [];
-const imageSummaryCache = new Map<string, Promise<string>>();
 
 interface FriendCommentTrigger {
   kind: 'event' | 'comment';
@@ -100,6 +103,10 @@ function cloneModel(model: ModelRecord): ModelRecord {
   return {
     ...model,
   };
+}
+
+function hasModelId(models: ModelRecord[], modelId: string): boolean {
+  return Boolean(modelId.trim() && models.some((model) => model.id === modelId));
 }
 
 function cloneDiaryBook(book: DiaryBookRecord | null | undefined): DiaryBookRecord | null {
@@ -144,11 +151,8 @@ function normalizeComment(raw: Partial<CommentRecord>): CommentRecord {
 
 function normalizeModel(raw: Partial<ModelRecord>): ModelRecord {
   return {
-    id: raw.id ?? randomId('model'),
-    name: raw.name ?? 'Model',
-    base_url: raw.base_url ?? '',
-    api_key: raw.api_key ?? '',
-    img_dealing: raw.img_dealing !== false,
+    id: typeof raw.id === 'string' ? raw.id.trim() : '',
+    name: typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim() : 'Model',
   };
 }
 
@@ -201,12 +205,23 @@ function normalizeMail(raw: Partial<MailRecord>): MailRecord {
 }
 
 function normalizeJob(raw: Partial<PendingAiJob>): PendingAiJob {
+  const legacyStatus = raw.status === 'pending' ? 'create_remote_task' : raw.status;
+
   return {
     id: raw.id ?? randomId('job'),
     type: raw.type ?? 'enrich_event',
-    status: raw.status ?? 'pending',
+    status: legacyStatus ?? 'create_remote_task',
     run_at: raw.run_at ?? new Date().toISOString(),
-    retries: raw.retries ?? 0,
+    retry_count: raw.retry_count ?? (raw as { retries?: number }).retries ?? 0,
+    resume_status: raw.resume_status,
+    client_request_id: raw.client_request_id,
+    remote_task_id: raw.remote_task_id,
+    remote_status: raw.remote_status,
+    remote_error_code: raw.remote_error_code,
+    remote_response: raw.remote_response,
+    remote_created_at: raw.remote_created_at,
+    remote_started_at: raw.remote_started_at,
+    remote_finished_at: raw.remote_finished_at,
     payload: raw.payload ?? {},
     last_error: raw.last_error,
   };
@@ -306,7 +321,7 @@ function makeWelcomeMail(): MailRecord {
       <article style="padding:24px;font-family:'Segoe UI',sans-serif;background:#fffaf0;color:#2d2115">
         <h1 style="margin-top:0">欢迎来到 Ember</h1>
         <p>我是 Ember。这里会慢慢装下你的 Event、Task、朋友评论和 Summary Mail。</p>
-        <p>开始前先到 Setting 里配置至少一个可用的 Model，配好之后就可以写下第一条记录了。</p>
+        <p>开始前先到 Setting 里登录服务端账号，并刷新模型列表，之后就可以写下第一条记录了。</p>
       </article>
     `.trim(),
   };
@@ -333,9 +348,12 @@ function createInitialState(): AppState {
   };
 
   return {
-    schema_version: 2,
+    schema_version: 3,
     config: createDefaultConfig(),
     token: '',
+    auth_user_id: '',
+    auth_username: '',
+    auth_expires_at: null,
     models: createDefaultModels(),
     friends: createDefaultFriends(),
     tags,
@@ -372,16 +390,19 @@ function normalizeState(raw: Partial<AppState> | undefined): AppState {
   const tags = dedupeTags([...(raw.tags ?? []), ...seed.tags].map(cloneTag));
   const models =
     Array.isArray(raw.models) && raw.models.length ? raw.models.map((item) => normalizeModel(item)) : seed.models.map(cloneModel);
-  const fallbackModelId = models[0]?.id ?? seed.models[0]?.id ?? 'your-model-id';
+  const fallbackModelId = models[0]?.id ?? seed.models[0]?.id ?? '';
   const friends =
     Array.isArray(raw.friends) && raw.friends.length
       ? raw.friends.map((item) => normalizeFriend(item, fallbackModelId))
-      : seed.friends.map((item) => normalizeFriend(item, fallbackModelId));
+      : createDefaultFriends(fallbackModelId, models).map((item) => normalizeFriend(item, fallbackModelId));
 
   return {
-    schema_version: 2,
+    schema_version: 3,
     config,
     token: raw.token ?? '',
+    auth_user_id: raw.auth_user_id ?? '',
+    auth_username: raw.auth_username ?? '',
+    auth_expires_at: raw.auth_expires_at ?? null,
     models,
     friends,
     tags,
@@ -425,19 +446,17 @@ async function persistState(): Promise<void> {
   await persistChain;
 }
 
+async function persistStateAndScheduleAiPump(): Promise<void> {
+  await persistState();
+  scheduleAiPump();
+}
+
 function schedulePersist(): void {
-  if (!bootstrapped || typeof window === 'undefined') {
+  if (!bootstrapped) {
     return;
   }
 
-  if (persistTimer) {
-    window.clearTimeout(persistTimer);
-    persistTimer = null;
-  }
-
-  persistTimer = window.setTimeout(() => {
-    void persistState();
-  }, 180);
+  void persistState();
 }
 
 watch(
@@ -636,10 +655,13 @@ function replaceState(next: AppState): void {
   state.schema_version = next.schema_version;
   Object.assign(state.config, next.config);
   state.token = next.token;
+  state.auth_user_id = next.auth_user_id;
+  state.auth_username = next.auth_username;
+  state.auth_expires_at = next.auth_expires_at;
   replaceReactiveArray(state.models, next.models.map(cloneModel));
   replaceReactiveArray(
     state.friends,
-    next.friends.map((item) => normalizeFriend(item, next.models[0]?.id ?? 'your-model-id')),
+    next.friends.map((item) => normalizeFriend(item, next.models[0]?.id ?? '')),
   );
   replaceReactiveArray(state.tags, next.tags.map(cloneTag));
   replaceReactiveArray(state.events, next.events.map(cloneEvent));
@@ -649,6 +671,25 @@ function replaceState(next: AppState): void {
   replaceReactiveArray(state.ai_jobs, next.ai_jobs.map(normalizeJob));
   state.last_summary_check = next.last_summary_check;
   state.last_opened_my_panel = next.last_opened_my_panel;
+}
+
+function reconcileFriendModelAssignments(models: ModelRecord[]): void {
+  const fallbackModelId = models[0]?.id ?? '';
+
+  state.friends.forEach((friend) => {
+    if (hasModelId(models, friend.model_id)) {
+      return;
+    }
+
+    if (friend.id === 'friend_ice' || friend.id === 'friend_fire' || friend.id === 'friend_Ithea') {
+      friend.model_id = resolveDefaultFriendModelId(friend.id, models, fallbackModelId);
+      return;
+    }
+
+    if (!friend.model_id.trim()) {
+      friend.model_id = fallbackModelId;
+    }
+  });
 }
 
 function findTag(label: string, type?: TagType): Tag | undefined {
@@ -797,10 +838,37 @@ async function restoreFriendMemoryFiles(
   }
 }
 
+function isAuthExpired(): boolean {
+  if (!state.auth_expires_at) {
+    return true;
+  }
+
+  return new Date(state.auth_expires_at).getTime() <= Date.now();
+}
+
+function hasActiveSession(): boolean {
+  return Boolean(state.token.trim() && state.auth_user_id.trim() && !isAuthExpired());
+}
+
+function clearAuthState(clearModels = true): void {
+  state.token = '';
+  state.auth_user_id = '';
+  state.auth_username = '';
+  state.auth_expires_at = null;
+  if (clearModels) {
+    replaceReactiveArray(state.models, []);
+  }
+}
+
 function getPrimaryModel(): ModelRecord {
-  const model = state.models.find((item) => item.id.trim() && item.base_url.trim()) ?? state.models[0];
+  const model =
+    PRIMARY_MODEL_PREFERENCES.map((preferredId) => state.models.find((item) => item.id === preferredId)).find(
+      (item): item is ModelRecord => Boolean(item),
+    ) ??
+    state.models.find((item) => item.id.trim()) ??
+    state.models[0];
   if (!model) {
-    throw new Error('当前没有可用的 AI 模型配置');
+    throw new Error('当前没有可用的服务端模型。');
   }
 
   return model;
@@ -810,86 +878,115 @@ function getModelById(id: string): ModelRecord | undefined {
   return state.models.find((model) => model.id === id);
 }
 
-function getFirstImageCapableModel(): ModelRecord | undefined {
-  return state.models.find((model) => model.id.trim() && model.base_url.trim() && model.img_dealing);
+function isModelAvailable(modelId: string): boolean {
+  return Boolean(modelId.trim() && getModelById(modelId));
 }
 
 function getFriendModel(friend: FriendRecord): ModelRecord {
-  return getModelById(friend.model_id) ?? getPrimaryModel();
+  const model = getModelById(friend.model_id);
+  if (!model) {
+    throw new Error(`${friend.name} 当前绑定的模型不可用，请重新选择。`);
+  }
+
+  return model;
 }
 
-async function summarizeEventImages(
-  event: EventRecord,
-  purpose: 'friend_comment' | 'event_enrichment' | 'summary' | 'arrange_tags',
-): Promise<string> {
-  if (!eventHasImageAssets(event)) {
-    return '';
-  }
-
-  const imageModel = getFirstImageCapableModel();
-  if (!imageModel) {
-    throw new Error('当前没有可处理图片输入的模型，无法处理含图内容');
-  }
-
-  const cacheKey = `${purpose}:${imageModel.id}:${event.id}`;
-  const cached = imageSummaryCache.get(cacheKey);
-  if (cached) {
-    return cached;
-  }
-
-  const task = aiService
-    .summarizeImages({
-      model: imageModel,
-      images: event.assets,
-      purpose,
-    })
-    .catch((error) => {
-      imageSummaryCache.delete(cacheKey);
-      throw error;
-    });
-
-  imageSummaryCache.set(cacheKey, task);
-  return task;
+function canQueueRemoteAi(): boolean {
+  return hasActiveSession() && state.models.length > 0 && serverService.isConfigured();
 }
 
-async function buildSingleEventVisualContext(
-  targetModel: ModelRecord,
-  event: EventRecord,
-  purpose: 'friend_comment' | 'event_enrichment',
-): Promise<{
-  attachImages: boolean;
-  imageSummary?: string;
-}> {
-  if (!eventHasImageAssets(event)) {
-    return { attachImages: false };
-  }
-
-  if (targetModel.img_dealing) {
-    return { attachImages: true };
-  }
-
-  return {
-    attachImages: false,
-    imageSummary: await summarizeEventImages(event, purpose),
-  };
+function applyAuthPayload(payload: {
+  token: string;
+  user: { id: string; username: string };
+  expires_at: string;
+}): void {
+  state.token = payload.token;
+  state.auth_user_id = payload.user.id;
+  state.auth_username = payload.user.username;
+  state.auth_expires_at = payload.expires_at;
 }
 
-async function buildImageSummaryByEventId(
-  targetModel: ModelRecord,
-  events: EventRecord[],
-  purpose: 'summary' | 'arrange_tags',
-): Promise<Record<string, string>> {
-  if (targetModel.img_dealing) {
-    return {};
+function buildRemoteClientRequestId(job: PendingAiJob): string {
+  return job.client_request_id?.trim() || `${job.type}:${job.id}`;
+}
+
+function isRunnableJobStatus(status: PendingAiJob['status']): status is RunnableAiJobStatus {
+  return ['create_remote_task', 'poll_remote_task', 'apply_remote_result', 'ack_remote_task'].includes(status);
+}
+
+function normalizeRunnableJobStatus(job: PendingAiJob): RunnableAiJobStatus {
+  if (isRunnableJobStatus(job.status)) {
+    return job.status;
   }
 
-  const entries = await Promise.all(
-    events
-      .filter((event) => eventHasImageAssets(event))
-      .map(async (event) => [event.id, await summarizeEventImages(event, purpose)] as const),
-  );
+  if (job.status === 'waiting_retry' && job.resume_status) {
+    return job.resume_status;
+  }
 
-  return Object.fromEntries(entries.filter((entry) => Boolean(entry[1].trim())));
+  return 'create_remote_task';
+}
+
+function updateJobFromRemoteTask(job: PendingAiJob, remoteStatus: {
+  id: string;
+  state: RemoteTaskStatus;
+  retry_count?: number;
+  ai_response?: string | null;
+  error_code?: string | null;
+  error_message?: string | null;
+  created_at?: string | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+}): void {
+  job.remote_task_id = remoteStatus.id;
+  job.remote_status = remoteStatus.state;
+  job.remote_response = typeof remoteStatus.ai_response === 'string' ? remoteStatus.ai_response : job.remote_response;
+  job.remote_error_code = remoteStatus.error_code ?? undefined;
+  job.remote_created_at = remoteStatus.created_at ?? job.remote_created_at;
+  job.remote_started_at = remoteStatus.started_at ?? job.remote_started_at;
+  job.remote_finished_at = remoteStatus.finished_at ?? job.remote_finished_at;
+  if (remoteStatus.error_message) {
+    job.last_error = remoteStatus.error_message;
+  }
+}
+
+function resetJobError(job: PendingAiJob): void {
+  job.last_error = undefined;
+  job.remote_error_code = undefined;
+}
+
+function scheduleJobRetry(job: PendingAiJob, stage: RunnableAiJobStatus, error: unknown): void {
+  const message = error instanceof Error ? error.message : 'Unknown job error';
+  if (job.retry_count < RETRY_DELAYS.length) {
+    job.retry_count += 1;
+    job.resume_status = stage;
+    job.status = 'waiting_retry';
+    job.run_at = new Date(Date.now() + RETRY_DELAYS[job.retry_count - 1]).toISOString();
+    job.last_error = message;
+    return;
+  }
+
+  job.status = 'failed';
+  job.resume_status = undefined;
+  job.last_error = message;
+}
+
+function failJob(job: PendingAiJob, error: unknown, remoteErrorCode?: string): void {
+  job.status = 'failed';
+  job.resume_status = undefined;
+  job.last_error = error instanceof Error ? error.message : 'Unknown job error';
+  job.remote_error_code = remoteErrorCode;
+}
+
+function beginNextJobStage(job: PendingAiJob, status: RunnableAiJobStatus, delayMs = 0): void {
+  job.status = status;
+  job.resume_status = undefined;
+  job.run_at = new Date(Date.now() + delayMs).toISOString();
+}
+
+function completeJob(job: PendingAiJob): void {
+  job.status = 'done';
+  job.resume_status = undefined;
+  job.run_at = new Date().toISOString();
 }
 
 function taskStateOf(event: EventRecord): 'event' | 'ongoing' | 'finished' | 'failed' {
@@ -941,23 +1038,41 @@ function moodScoreOf(event: EventRecord): number {
     .reduce((sum, tag) => sum + (state.config.mood_weights[normalizeLabel(tag.label)] ?? 0), 0);
 }
 
-function queueJob(job: PendingAiJob): void {
-  state.ai_jobs.push(job);
-  scheduleAiPump();
+function isActiveAiJob(job: PendingAiJob): boolean {
+  return job.status !== 'done' && job.status !== 'failed';
 }
 
-function queueEventEnrichment(eventId: string): void {
+function queueJob(job: PendingAiJob, autoSchedule = true): void {
+  state.ai_jobs.push(job);
+  if (autoSchedule) {
+    scheduleAiPump();
+  }
+}
+
+function queueEventEnrichment(eventId: string, autoSchedule = true): void {
+  if (!canQueueRemoteAi()) {
+    return;
+  }
+
   queueJob({
     id: randomId('job'),
     type: 'enrich_event',
-    status: 'pending',
-    run_at: new Date(Date.now() + 500).toISOString(),
-    retries: 0,
+    status: 'create_remote_task',
+    run_at: new Date().toISOString(),
+    retry_count: 0,
     payload: { event_id: eventId },
-  });
+  }, autoSchedule);
 }
 
-function queueFriendJobs(event: EventRecord, trigger: FriendCommentTrigger = { kind: 'event' }): void {
+function queueFriendJobs(
+  event: EventRecord,
+  trigger: FriendCommentTrigger = { kind: 'event' },
+  autoSchedule = true,
+): void {
+  if (!canQueueRemoteAi()) {
+    return;
+  }
+
   state.friends
     .filter((friend) => friend.enabled)
     .forEach((friend) => {
@@ -969,7 +1084,7 @@ function queueFriendJobs(event: EventRecord, trigger: FriendCommentTrigger = { k
       const exists = state.ai_jobs.some(
         (job) =>
           job.type === 'friend_comment' &&
-          job.status === 'pending' &&
+          isActiveAiJob(job) &&
           job.payload.phase === 'generate' &&
           job.payload.event_id === event.id &&
           job.payload.friend_id === friend.id &&
@@ -982,25 +1097,29 @@ function queueFriendJobs(event: EventRecord, trigger: FriendCommentTrigger = { k
       queueJob({
         id: randomId('job'),
         type: 'friend_comment',
-        status: 'pending',
-        run_at: new Date(Date.now() + 500).toISOString(),
-        retries: 0,
+        status: 'create_remote_task',
+        run_at: new Date().toISOString(),
+        retry_count: 0,
         payload: {
           event_id: event.id,
           friend_id: friend.id,
           phase: 'generate',
           source_comment_id: sourceCommentId,
         },
-      });
+      }, autoSchedule);
     });
 }
 
-function arrangeTagsIfNeeded(): void {
+function arrangeTagsIfNeeded(autoSchedule = true): void {
+  if (!canQueueRemoteAi()) {
+    return;
+  }
+
   if (state.events.length === 0 || state.events.length % 50 !== 0) {
     return;
   }
 
-  const exists = state.ai_jobs.some((job) => job.type === 'arrange_tags' && job.status === 'pending');
+  const exists = state.ai_jobs.some((job) => job.type === 'arrange_tags' && isActiveAiJob(job));
   if (exists) {
     return;
   }
@@ -1008,18 +1127,22 @@ function arrangeTagsIfNeeded(): void {
   queueJob({
     id: randomId('job'),
     type: 'arrange_tags',
-    status: 'pending',
-    run_at: new Date(Date.now() + 800).toISOString(),
-    retries: 0,
+    status: 'create_remote_task',
+    run_at: new Date().toISOString(),
+    retry_count: 0,
     payload: {},
-  });
+  }, autoSchedule);
 }
 
-function queueSummary(interval: SummaryInterval, rangeEnd: string, force = false): void {
+function queueSummary(interval: SummaryInterval, rangeEnd: string, force = false, autoSchedule = true): void {
+  if (!canQueueRemoteAi()) {
+    return;
+  }
+
   const exists = state.ai_jobs.some(
     (job) =>
       job.type === 'summary' &&
-      job.status === 'pending' &&
+      isActiveAiJob(job) &&
       job.payload.interval === interval &&
       job.payload.range_end === rangeEnd,
   );
@@ -1031,15 +1154,15 @@ function queueSummary(interval: SummaryInterval, rangeEnd: string, force = false
   queueJob({
     id: randomId('job'),
     type: 'summary',
-    status: 'pending',
-    run_at: new Date(Date.now() + 800).toISOString(),
-    retries: 0,
+    status: 'create_remote_task',
+    run_at: new Date().toISOString(),
+    retry_count: 0,
     payload: {
       interval,
       range_end: rangeEnd,
       force,
     },
-  });
+  }, autoSchedule);
 }
 
 function shouldGenerateSummary(interval: SummaryInterval, rangeEnd: Date): boolean {
@@ -1070,7 +1193,7 @@ function scheduleSummaryCheckPump(): void {
   }, Math.max(1000, nextCheck - Date.now()));
 }
 
-function ensureDailySummaries(force = false): void {
+function ensureDailySummaries(force = false, autoSchedule = true): void {
   const todayKey = toDateKey(new Date());
   if (!force && state.last_summary_check === todayKey) {
     return;
@@ -1086,7 +1209,7 @@ function ensureDailySummaries(force = false): void {
   while (toDateKey(cursor) <= todayKey) {
     state.config.summary_intervals.forEach((interval) => {
       if (shouldGenerateSummary(interval, cursor)) {
-        queueSummary(interval, new Date(cursor).toISOString(), force);
+        queueSummary(interval, new Date(cursor).toISOString(), force, autoSchedule);
       }
     });
 
@@ -1134,7 +1257,7 @@ function runDueTaskFailures(): void {
   scheduleTaskDeadlinePump();
 }
 
-function createEvent(payload: { title: string; raw: string; tags: Tag[]; assets: AssetRecord[] }): EventRecord {
+async function createEvent(payload: { title: string; raw: string; tags: Tag[]; assets: AssetRecord[] }): Promise<EventRecord> {
   const now = new Date().toISOString();
   const tags = registerTagUsage(dedupeTags(payload.tags), now);
 
@@ -1150,13 +1273,14 @@ function createEvent(payload: { title: string; raw: string; tags: Tag[]; assets:
   };
 
   state.events.push(event);
-  queueEventEnrichment(event.id);
-  arrangeTagsIfNeeded();
-  ensureDailySummaries();
+  queueEventEnrichment(event.id, false);
+  arrangeTagsIfNeeded(false);
+  ensureDailySummaries(false, false);
+  await persistStateAndScheduleAiPump();
   return event;
 }
 
-function createTaskFromText(text: string, dueAt: string | null): EventRecord | null {
+async function createTaskFromText(text: string, dueAt: string | null): Promise<EventRecord | null> {
   const clean = text.trim();
   if (!clean) {
     return null;
@@ -1180,21 +1304,23 @@ function createTaskFromText(text: string, dueAt: string | null): EventRecord | n
   };
 
   state.events.push(event);
+  queueEventEnrichment(event.id, false);
+  arrangeTagsIfNeeded(false);
+  ensureDailySummaries(false, false);
+  await persistState();
   void syncTaskNotification(event);
   scheduleTaskDeadlinePump();
-  queueEventEnrichment(event.id);
-  arrangeTagsIfNeeded();
-  ensureDailySummaries();
+  scheduleAiPump();
   return event;
 }
 
-function addComment(
+async function addComment(
   eventId: string,
   content: string,
   sender = 'user',
   attitude?: number,
   replyToCommentId?: string,
-): void {
+): Promise<void> {
   const event = getEventById(eventId);
   if (!event || !content.trim()) {
     return;
@@ -1214,7 +1340,8 @@ function addComment(
     kind: 'comment',
     commentId: comment.id,
     sender,
-  });
+  }, false);
+  await persistStateAndScheduleAiPump();
 }
 
 function updateTaskDueTime(eventId: string, dueAt: string | null): void {
@@ -1263,7 +1390,22 @@ function summaryMetaKey(interval: SummaryInterval, rangeEnd: string): string {
   return `${interval}:${toDateKey(rangeEnd)}`;
 }
 
-async function buildSummary(interval: SummaryInterval, rangeEnd: string, force: boolean): Promise<void> {
+function getSummaryContext(interval: SummaryInterval, rangeEnd: string): {
+  existingIndex: number;
+  existingSummaryIndex: number;
+  startDate: Date;
+  endDate: Date;
+  relevantEvents: EventRecord[];
+  finished: number;
+  failed: number;
+  rest: number;
+  rate: number;
+  moodTrackBase: Array<[string, number]>;
+  moodTotal: number;
+  dailyTotals: Map<string, number>;
+  monthlyAverages: Array<{ month: string; average: number }>;
+  summaryInput: SummaryGenerationInput;
+} | null {
   const endDate = new Date(rangeEnd);
   const startDate = addDays(endDate, -(SUMMARY_WINDOWS[interval] - 1));
   const metaKey = summaryMetaKey(interval, rangeEnd);
@@ -1271,10 +1413,6 @@ async function buildSummary(interval: SummaryInterval, rangeEnd: string, force: 
     (mail) => mail.summary_meta && summaryMetaKey(mail.summary_meta.interval, mail.summary_meta.range_end) === metaKey,
   );
   const existingSummaryIndex = state.summaries.findIndex((summary) => summaryMetaKey(summary.interval, summary.range_end) === metaKey);
-
-  if (existingIndex >= 0 && existingSummaryIndex >= 0 && !force) {
-    return;
-  }
 
   const startTime = startDate.getTime();
   const endTime = endDate.getTime();
@@ -1294,7 +1432,7 @@ async function buildSummary(interval: SummaryInterval, rangeEnd: string, force: 
   });
 
   if (!relevantEvents.length) {
-    return;
+    return null;
   }
 
   const tasks = relevantEvents.filter((event) => isTask(event));
@@ -1342,12 +1480,21 @@ async function buildSummary(interval: SummaryInterval, rangeEnd: string, force: 
         title: truncateText(event.title || event.raw || '未命名任务', 40),
         time: event.time,
       }));
-
-  const summaryModel = getPrimaryModel();
-  const imageSummaryByEventId = await buildImageSummaryByEventId(summaryModel, relevantEvents, 'summary');
-  const summaryCopy = await aiService.generateSummary({
-    model: summaryModel,
-    summary: {
+  return {
+    existingIndex,
+    existingSummaryIndex,
+    startDate,
+    endDate,
+    relevantEvents,
+    finished,
+    failed,
+    rest,
+    rate,
+    moodTrackBase,
+    moodTotal,
+    dailyTotals,
+    monthlyAverages,
+    summaryInput: {
       interval,
       rangeLabel: `${toDateKey(startDate)} → ${toDateKey(endDate)}`,
       taskCounts: { finished, failed, rest, rate },
@@ -1369,6 +1516,7 @@ async function buildSummary(interval: SummaryInterval, rangeEnd: string, force: 
         .sort(compareEventsDesc)
         .slice(0, 12)
         .map((event) => ({
+          id: event.id,
           time: event.time,
           title: truncateText(event.title || '未命名记录', 40),
           raw: truncateText(event.raw, 160),
@@ -1377,11 +1525,35 @@ async function buildSummary(interval: SummaryInterval, rangeEnd: string, force: 
             .map((tag) => `${tag.type}:${tag.label}`),
           comment_count: event.comments.length,
           task_state: taskStateOf(event),
-          image_summary: imageSummaryByEventId[event.id] ?? '',
         })),
     },
-  });
+  };
+}
 
+function applySummaryResult(
+  interval: SummaryInterval,
+  rangeEnd: string,
+  summaryCopy: SummaryGenerationResult,
+): void {
+  const context = getSummaryContext(interval, rangeEnd);
+  if (!context) {
+    return;
+  }
+
+  const {
+    existingIndex,
+    existingSummaryIndex,
+    startDate,
+    endDate,
+    finished,
+    failed,
+    rest,
+    rate,
+    moodTrackBase,
+    moodTotal,
+    dailyTotals,
+    monthlyAverages,
+  } = context;
   const dateLabel = toDateKey(endDate);
   const title = `${summaryCopy.title} · ${dateLabel}`;
   const mail: MailRecord = {
@@ -1446,166 +1618,415 @@ async function buildSummary(interval: SummaryInterval, rangeEnd: string, force: 
   }
 }
 
-async function executeJob(job: PendingAiJob): Promise<void> {
-  try {
-    if (job.type === 'enrich_event') {
-      const event = getEventById(String(job.payload.event_id));
-      if (!event) {
-        job.status = 'done';
-        return;
-      }
+function isAuthServerError(error: unknown): error is ServerError {
+  return (
+    error instanceof ServerError &&
+    (error.status === 401 || error.code === 'auth_invalid' || error.code === 'auth_expired')
+  );
+}
 
-      const model = getPrimaryModel();
-      const visualContext = await buildSingleEventVisualContext(model, event, 'event_enrichment');
-      const enrichment = await aiService.enrichEvent({
-        model,
-        event: cloneEvent(event),
-        existingTags: state.tags.filter((tag) => !tag.system).map(cloneTag),
-        isTask: isTask(event),
-        imageSummary: visualContext.imageSummary,
-        attachImages: visualContext.attachImages,
-      });
+function canRetryRemoteError(error: unknown): boolean {
+  if (!(error instanceof ServerError)) {
+    return true;
+  }
 
-      if (!event.title.trim() && enrichment.title) {
-        event.title = enrichment.title;
-      }
+  if (isAuthServerError(error)) {
+    return false;
+  }
 
-      const inferred = materializeAiTags(enrichment.tags);
-      if (inferred.length) {
-        mergeTagsIntoEvent(event, inferred, new Date().toISOString());
-      }
+  return error.status === 408 || error.status === 429 || error.status >= 500;
+}
 
-      queueFriendJobs(event);
-      job.status = 'done';
+function handleRemoteStageError(job: PendingAiJob, stage: RunnableAiJobStatus, error: unknown): void {
+  if (isAuthServerError(error)) {
+    clearAuthState();
+    failJob(job, error, error.code);
+    return;
+  }
+
+  if (canRetryRemoteError(error)) {
+    scheduleJobRetry(job, stage, error);
+    return;
+  }
+
+  failJob(job, error, error instanceof ServerError ? error.code : undefined);
+}
+
+function queueFriendDeliveryJob(input: {
+  eventId: string;
+  friendId: string;
+  attitude: number;
+  comment: string;
+  replyToCommentId?: string;
+  runAt: string;
+}): void {
+  const exists = state.ai_jobs.some(
+    (job) =>
+      job.type === 'friend_comment' &&
+      isActiveAiJob(job) &&
+      job.payload.phase === 'deliver' &&
+      job.payload.event_id === input.eventId &&
+      job.payload.friend_id === input.friendId &&
+      job.payload.comment === input.comment &&
+      (job.payload.reply_to_comment_id ?? '') === (input.replyToCommentId ?? ''),
+  );
+  if (exists) {
+    return;
+  }
+
+  queueJob({
+    id: randomId('job'),
+    type: 'friend_comment',
+    status: 'apply_remote_result',
+    run_at: input.runAt,
+    retry_count: 0,
+    payload: {
+      phase: 'deliver',
+      event_id: input.eventId,
+      friend_id: input.friendId,
+      attitude: input.attitude,
+      comment: input.comment,
+      reply_to_comment_id: input.replyToCommentId,
+    },
+  });
+}
+
+async function buildRemoteTaskRequest(job: PendingAiJob): Promise<Awaited<ReturnType<typeof aiService.buildEventEnrichmentTask>> | null> {
+  if (job.type === 'enrich_event') {
+    const event = getEventById(String(job.payload.event_id));
+    if (!event) {
+      return null;
+    }
+
+    const model = getPrimaryModel();
+    return aiService.buildEventEnrichmentTask({
+      modelId: model.id,
+      event: cloneEvent(event),
+      existingTags: state.tags.filter((tag) => !tag.system).map(cloneTag),
+      isTask: isTask(event),
+    });
+  }
+
+  if (job.type === 'friend_comment') {
+    const phase = String(job.payload.phase ?? 'generate');
+    if (phase !== 'generate') {
+      return null;
+    }
+
+    const event = getEventById(String(job.payload.event_id));
+    const friendId = String(job.payload.friend_id);
+    const friend = state.friends.find((item) => item.id === friendId);
+    if (!event || !friend || !friend.enabled) {
+      return null;
+    }
+
+    const sourceCommentId =
+      typeof job.payload.source_comment_id === 'string' && job.payload.source_comment_id.trim()
+        ? job.payload.source_comment_id.trim()
+        : undefined;
+    const sourceComment = getCommentById(event, sourceCommentId);
+    const model = getFriendModel(friend);
+    return aiService.buildFriendCommentTask({
+      modelId: model.id,
+      event: cloneEvent(event),
+      friend: { ...friend },
+      isTask: isTask(event),
+      taskState: taskStateOf(event),
+      memory: await readFriendMemory(friend),
+      memoryMaxLength: FRIEND_MEMORY_MAX_CHARS,
+      repliedComment: sourceComment,
+    });
+  }
+
+  if (job.type === 'summary') {
+    const interval = job.payload.interval as SummaryInterval;
+    const rangeEnd = String(job.payload.range_end);
+    const force = Boolean(job.payload.force);
+    const context = getSummaryContext(interval, rangeEnd);
+    if (!context) {
+      return null;
+    }
+    if (context.existingIndex >= 0 && context.existingSummaryIndex >= 0 && !force) {
+      return null;
+    }
+
+    const model = getPrimaryModel();
+    return aiService.buildSummaryTask({
+      modelId: model.id,
+      summary: context.summaryInput,
+      relevantEvents: context.relevantEvents.map(cloneEvent),
+    });
+  }
+
+  if (job.type === 'arrange_tags') {
+    const recentEvents = sortedEvents.value.slice(0, 50).map(cloneEvent);
+    if (!recentEvents.length) {
+      return null;
+    }
+
+    const model = getPrimaryModel();
+    return aiService.buildArrangeTagsTask({
+      modelId: model.id,
+      recentEvents,
+      existingTags: state.tags.filter((tag) => !tag.system).map(cloneTag),
+    });
+  }
+
+  return null;
+}
+
+async function createRemoteTaskForJob(job: PendingAiJob): Promise<void> {
+  const taskRequest = await buildRemoteTaskRequest(job);
+  if (!taskRequest) {
+    completeJob(job);
+    return;
+  }
+
+  const clientRequestId = buildRemoteClientRequestId(job);
+  if (job.client_request_id !== clientRequestId) {
+    job.client_request_id = clientRequestId;
+    await persistState();
+  }
+  const task = await serverService.createTask({
+    token: state.token,
+    clientRequestId,
+    modelId: taskRequest.modelId,
+    requestBody: taskRequest.requestBody,
+  });
+  resetJobError(job);
+  updateJobFromRemoteTask(job, task);
+  await persistState();
+
+  if (task.state === 'acknowledged') {
+    completeJob(job);
+    return;
+  }
+
+  if (task.state === 'failed') {
+    failJob(job, new Error(task.error_message || 'Remote task failed.'), task.error_code ?? undefined);
+    return;
+  }
+
+  if (task.state === 'succeeded') {
+    beginNextJobStage(job, 'apply_remote_result');
+    return;
+  }
+
+  beginNextJobStage(job, 'poll_remote_task', REMOTE_POLL_INTERVAL_MS);
+}
+
+async function pollRemoteTaskForJob(job: PendingAiJob): Promise<void> {
+  if (!job.remote_task_id) {
+    beginNextJobStage(job, 'create_remote_task');
+    return;
+  }
+
+  const task = await serverService.getTask(state.token, job.remote_task_id);
+  resetJobError(job);
+  updateJobFromRemoteTask(job, task);
+
+  if (task.state === 'queued' || task.state === 'running') {
+    beginNextJobStage(job, 'poll_remote_task', REMOTE_POLL_INTERVAL_MS);
+    return;
+  }
+
+  if (task.state === 'acknowledged') {
+    completeJob(job);
+    return;
+  }
+
+  if (task.state === 'failed') {
+    failJob(job, new Error(task.error_message || 'Remote task failed.'), task.error_code ?? undefined);
+    return;
+  }
+
+  beginNextJobStage(job, 'apply_remote_result');
+}
+
+async function applyRemoteResultForJob(job: PendingAiJob): Promise<void> {
+  if (job.type === 'friend_comment' && String(job.payload.phase ?? 'generate') === 'deliver') {
+    const event = getEventById(String(job.payload.event_id));
+    const friendId = String(job.payload.friend_id);
+    const comment = String(job.payload.comment ?? '').trim();
+    const attitude = Number(job.payload.attitude);
+    const replyToCommentId =
+      typeof job.payload.reply_to_comment_id === 'string' && job.payload.reply_to_comment_id.trim()
+        ? job.payload.reply_to_comment_id.trim()
+        : undefined;
+
+    if (
+      !event ||
+      !comment ||
+      event.comments.some(
+        (item) =>
+          item.sender === friendId && item.content === comment && (item.reply_to_comment_id ?? '') === (replyToCommentId ?? ''),
+      )
+    ) {
+      completeJob(job);
       return;
     }
 
-    if (job.type === 'friend_comment') {
-      const event = getEventById(String(job.payload.event_id));
-      const friendId = String(job.payload.friend_id);
-      const phase = String(job.payload.phase ?? 'deliver');
+    await addComment(event.id, comment, friendId, Number.isFinite(attitude) ? attitude : undefined, replyToCommentId);
+    completeJob(job);
+    return;
+  }
 
-      if (phase === 'generate') {
-        const friend = state.friends.find((item) => item.id === friendId);
-        if (!event || !friend || !friend.enabled) {
-          job.status = 'done';
-          return;
-        }
+  if (!job.remote_response?.trim() && job.remote_task_id) {
+    const task = await serverService.getTask(state.token, job.remote_task_id);
+    updateJobFromRemoteTask(job, task);
+  }
 
-        const sourceCommentId =
-          typeof job.payload.source_comment_id === 'string' && job.payload.source_comment_id.trim()
-            ? job.payload.source_comment_id.trim()
-            : undefined;
-        const sourceComment = getCommentById(event, sourceCommentId);
-        const model = getFriendModel(friend);
-        const visualContext = await buildSingleEventVisualContext(model, event, 'friend_comment');
-        const candidate = await aiService.generateFriendComment({
-          model,
-          event: cloneEvent(event),
-          friend: { ...friend },
-          isTask: isTask(event),
-          taskState: taskStateOf(event),
-          memory: await readFriendMemory(friend),
-          memoryMaxLength: FRIEND_MEMORY_MAX_CHARS,
-          repliedComment: sourceComment,
-          imageSummary: visualContext.imageSummary,
-          attachImages: visualContext.attachImages,
-        });
-        await writeFriendMemory(friend, candidate.memory);
+  const rawResponse = job.remote_response?.trim();
+  if (!rawResponse) {
+    throw new Error('Remote task did not return AI text.');
+  }
 
-        const baseProbability = friend.active * candidate.attitude;
-        const probability =
-          sourceComment && sourceComment.sender !== 'user'
-            ? clamp(baseProbability, 0, 1) * friend.ai_active
-            : baseProbability;
-        if (Math.random() > probability) {
-          job.status = 'done';
-          return;
-        }
-        const delayMinutes = Math.round((friend.latency + candidate.attitude * (1 - candidate.attitude)) * 60);
-        const scaledDelay = Math.max(
-          600,
-          Math.round(Math.max(1, delayMinutes) * DEMO_DELAY_UNIT_MS * (1.2 - clamp(friend.active, 0, 1) * 0.4)),
-        );
-        queueJob({
-          id: randomId('job'),
-          type: 'friend_comment',
-          status: 'pending',
-          run_at: new Date(Date.now() + scaledDelay).toISOString(),
-          retries: 0,
-          payload: {
-            phase: 'deliver',
-            event_id: event.id,
-            friend_id: friend.id,
-            attitude: candidate.attitude,
-            comment: candidate.comment,
-            reply_to_comment_id: sourceComment?.id,
-          },
-        });
-        job.status = 'done';
-        return;
-      }
-
-      const comment = String(job.payload.comment ?? '').trim();
-      const attitude = Number(job.payload.attitude);
-      const replyToCommentId =
-        typeof job.payload.reply_to_comment_id === 'string' && job.payload.reply_to_comment_id.trim()
-          ? job.payload.reply_to_comment_id.trim()
-          : undefined;
-
-      if (
-        !event ||
-        !comment ||
-        event.comments.some(
-          (item) =>
-            item.sender === friendId && item.content === comment && (item.reply_to_comment_id ?? '') === (replyToCommentId ?? ''),
-        )
-      ) {
-        job.status = 'done';
-        return;
-      }
-
-      addComment(event.id, comment, friendId, Number.isFinite(attitude) ? attitude : undefined, replyToCommentId);
-      job.status = 'done';
+  if (job.type === 'enrich_event') {
+    const event = getEventById(String(job.payload.event_id));
+    if (!event) {
+      beginNextJobStage(job, 'ack_remote_task');
       return;
     }
 
-    if (job.type === 'summary') {
-      await buildSummary(
-        job.payload.interval as SummaryInterval,
-        String(job.payload.range_end),
-        Boolean(job.payload.force),
+    const enrichment = aiService.parseEventEnrichment(rawResponse);
+    if (!event.title.trim() && enrichment.title) {
+      event.title = enrichment.title;
+    }
+
+    const inferred = materializeAiTags(enrichment.tags);
+    if (inferred.length) {
+      mergeTagsIntoEvent(event, inferred, new Date().toISOString());
+    }
+
+    queueFriendJobs(event);
+    beginNextJobStage(job, 'ack_remote_task');
+    return;
+  }
+
+  if (job.type === 'friend_comment') {
+    const event = getEventById(String(job.payload.event_id));
+    const friendId = String(job.payload.friend_id);
+    const friend = state.friends.find((item) => item.id === friendId);
+    if (!event || !friend || !friend.enabled) {
+      beginNextJobStage(job, 'ack_remote_task');
+      return;
+    }
+
+    const sourceCommentId =
+      typeof job.payload.source_comment_id === 'string' && job.payload.source_comment_id.trim()
+        ? job.payload.source_comment_id.trim()
+        : undefined;
+    const sourceComment = getCommentById(event, sourceCommentId);
+    const candidate = aiService.parseFriendComment(rawResponse);
+    await writeFriendMemory(friend, candidate.memory);
+
+    const baseProbability = friend.active * candidate.attitude;
+    const probability =
+      sourceComment && sourceComment.sender !== 'user'
+        ? clamp(baseProbability, 0, 1) * friend.ai_active
+        : baseProbability;
+
+    if (Math.random() <= probability) {
+      const delayMinutes = Math.round((friend.latency + candidate.attitude * (1 - candidate.attitude)) * 60);
+      const scaledDelay = Math.max(
+        600,
+        Math.round(Math.max(1, delayMinutes) * DEMO_DELAY_UNIT_MS * (1.2 - clamp(friend.active, 0, 1) * 0.4)),
       );
-      job.status = 'done';
-      return;
-    }
-
-    if (job.type === 'arrange_tags') {
-      const model = getPrimaryModel();
-      const recentEvents = sortedEvents.value.slice(0, 50).map(cloneEvent);
-      const drafts = await aiService.arrangeTags({
-        model,
-        recentEvents,
-        existingTags: state.tags.filter((tag) => !tag.system).map(cloneTag),
-        imageSummaryByEventId: await buildImageSummaryByEventId(model, recentEvents, 'arrange_tags'),
+      queueFriendDeliveryJob({
+        eventId: event.id,
+        friendId: friend.id,
+        attitude: candidate.attitude,
+        comment: candidate.comment,
+        replyToCommentId: sourceComment?.id,
+        runAt: new Date(Date.now() + scaledDelay).toISOString(),
       });
-      const created = materializeAiTags(drafts);
-      if (created.length) {
-        replaceReactiveArray(state.tags, mergeTagCatalog(state.tags, created, new Date().toISOString()));
-      }
-      job.status = 'done';
-      return;
     }
-  } catch (error) {
-    if (job.retries < RETRY_DELAYS.length) {
-      job.retries += 1;
-      job.run_at = new Date(Date.now() + RETRY_DELAYS[job.retries - 1]).toISOString();
-      job.last_error = error instanceof Error ? error.message : 'Unknown job error';
+
+    beginNextJobStage(job, 'ack_remote_task');
+    return;
+  }
+
+  if (job.type === 'summary') {
+    const interval = job.payload.interval as SummaryInterval;
+    const rangeEnd = String(job.payload.range_end);
+    applySummaryResult(interval, rangeEnd, aiService.parseSummary(rawResponse));
+    beginNextJobStage(job, 'ack_remote_task');
+    return;
+  }
+
+  if (job.type === 'arrange_tags') {
+    const drafts = aiService.parseArrangeTags(rawResponse);
+    const created = materializeAiTags(drafts);
+    if (created.length) {
+      replaceReactiveArray(state.tags, mergeTagCatalog(state.tags, created, new Date().toISOString()));
+    }
+    beginNextJobStage(job, 'ack_remote_task');
+  }
+}
+
+async function ackRemoteTaskForJob(job: PendingAiJob): Promise<void> {
+  if (!job.remote_task_id) {
+    completeJob(job);
+    return;
+  }
+
+  await serverService.ackTask(state.token, job.remote_task_id);
+  job.remote_status = 'acknowledged';
+  job.remote_response = undefined;
+  resetJobError(job);
+  completeJob(job);
+}
+
+async function executeJob(job: PendingAiJob): Promise<void> {
+  if (job.status === 'done' || job.status === 'failed') {
+    return;
+  }
+
+  const phase = String(job.payload.phase ?? 'generate');
+  if (phase !== 'deliver') {
+    if (!serverService.isConfigured()) {
+      failJob(job, new Error('Server API is not configured.'));
       return;
     }
 
-    job.status = 'failed';
-    job.last_error = error instanceof Error ? error.message : 'Unknown job error';
+    if (!hasActiveSession()) {
+      if (isAuthExpired()) {
+        clearAuthState();
+      }
+      failJob(job, new Error('Please sign in again before using AI.'), 'auth_invalid');
+      return;
+    }
+  }
+
+  const stage = normalizeRunnableJobStatus(job);
+  if (job.status === 'waiting_retry') {
+    job.status = stage;
+  }
+
+  try {
+    if (stage === 'create_remote_task') {
+      await createRemoteTaskForJob(job);
+      return;
+    }
+
+    if (stage === 'poll_remote_task') {
+      await pollRemoteTaskForJob(job);
+      return;
+    }
+
+    if (stage === 'apply_remote_result') {
+      await applyRemoteResultForJob(job);
+      return;
+    }
+
+    await ackRemoteTaskForJob(job);
+  } catch (error) {
+    if (stage === 'apply_remote_result') {
+      failJob(job, error, error instanceof ServerError ? error.code : undefined);
+      return;
+    }
+
+    handleRemoteStageError(job, stage, error);
   }
 }
 
@@ -1618,17 +2039,39 @@ async function runDueAiJobs(): Promise<void> {
   const now = Date.now();
   try {
     const dueJobs = state.ai_jobs
-      .filter((job) => job.status === 'pending' && new Date(job.run_at).getTime() <= now)
-      .sort((left, right) => new Date(left.run_at).getTime() - new Date(right.run_at).getTime())
-      .slice(0, 2);
+      .filter((job) => job.status !== 'done' && job.status !== 'failed' && new Date(job.run_at).getTime() <= now)
+      .sort((left, right) => new Date(left.run_at).getTime() - new Date(right.run_at).getTime());
 
-    for (const job of dueJobs) {
-      await executeJob(job);
+    const createRemoteTaskJobs = dueJobs.filter((job) => normalizeRunnableJobStatus(job) === 'create_remote_task');
+    const nonCreateJobs = dueJobs.filter((job) => normalizeRunnableJobStatus(job) !== 'create_remote_task');
+    let shouldPersistBeforeCreate = false;
+
+    for (const job of createRemoteTaskJobs) {
+      const clientRequestId = buildRemoteClientRequestId(job);
+      if (job.client_request_id !== clientRequestId) {
+        job.client_request_id = clientRequestId;
+        shouldPersistBeforeCreate = true;
+      }
     }
 
-    state.ai_jobs = state.ai_jobs
-      .filter((job) => job.status === 'pending' || job.status === 'failed')
-      .slice(-20);
+    if (shouldPersistBeforeCreate) {
+      await persistState();
+    }
+
+    if (createRemoteTaskJobs.length) {
+      await Promise.allSettled(createRemoteTaskJobs.map((job) => executeJob(job)));
+      await persistState();
+    }
+
+    for (const job of nonCreateJobs) {
+      await executeJob(job);
+      await persistState();
+    }
+
+    state.ai_jobs = state.ai_jobs.filter((job) => job.status !== 'done').slice(-40);
+    if (dueJobs.length) {
+      await persistState();
+    }
   } finally {
     aiPumpRunning = false;
     scheduleAiPump();
@@ -1646,7 +2089,7 @@ function scheduleAiPump(): void {
   }
 
   const nextRun = state.ai_jobs
-    .filter((job) => job.status === 'pending')
+    .filter((job) => job.status !== 'done' && job.status !== 'failed')
     .map((job) => new Date(job.run_at).getTime())
     .sort((left, right) => left - right)[0];
 
@@ -1679,7 +2122,7 @@ async function buildAssetExportList(): Promise<AppStateAssetExport[]> {
 
 async function exportJsonSnapshot(): Promise<void> {
   const payload: AppStateExportBundle = {
-    schema_version: 2,
+    schema_version: 3,
     exported_at: new Date().toISOString(),
     data: snapshotState(),
     assets: await buildAssetExportList(),
@@ -1700,7 +2143,7 @@ async function importJsonSnapshot(text: string): Promise<void> {
     ui_preferences?: Partial<UiPreferencesSnapshot>;
   };
 
-  if (![1, 2].includes(parsed.schema_version ?? 1)) {
+  if (![1, 2, 3].includes(parsed.schema_version ?? 1)) {
     throw new Error('暂不支持该 schema_version');
   }
 
@@ -1727,12 +2170,12 @@ async function importJsonSnapshot(text: string): Promise<void> {
   await restoreFriendMemoryFiles(next.friends, parsed.friend_memories);
   runDueTaskFailures();
   await syncAllTaskNotifications();
-  scheduleAiPump();
-  ensureDailySummaries(true);
+  ensureDailySummaries(true, false);
   ensureDiaryBook();
   scheduleTaskDeadlinePump();
   scheduleSummaryCheckPump();
-  schedulePersist();
+  await persistState();
+  scheduleAiPump();
 }
 
 async function exportDiaryHtml(): Promise<void> {
@@ -1798,26 +2241,63 @@ function consumeComposerAssets(): AssetRecord[] {
   return assets;
 }
 
-function addModel(): void {
-  state.models.push({
-    id: randomId('model'),
-    name: 'New Model',
-    base_url: '',
-    api_key: '',
-    img_dealing: true,
-  });
-}
-
-function removeModel(id: string): void {
-  if (state.models.length <= 1) {
-    return;
+async function refreshModels(): Promise<void> {
+  if (!serverService.isConfigured()) {
+    throw new Error('Server API is not configured.');
   }
 
-  state.models = state.models.filter((model) => model.id !== id);
+  if (!hasActiveSession()) {
+    throw new Error('Please sign in first.');
+  }
+
+  try {
+    const items = await serverService.getModels(state.token);
+    const nextModels = items.map((item) => normalizeModel(item));
+    replaceReactiveArray(state.models, nextModels);
+    reconcileFriendModelAssignments(nextModels);
+  } catch (error) {
+    if (isAuthServerError(error)) {
+      clearAuthState();
+    }
+    throw error;
+  }
+}
+
+async function signup(username: string, password: string): Promise<void> {
+  const cleanUsername = username.trim();
+  if (!cleanUsername || !password.trim()) {
+    throw new Error('Username and password are required.');
+  }
+
+  const payload = await serverService.signup(cleanUsername, password);
+  applyAuthPayload(payload);
+  await refreshModels();
+}
+
+async function signin(username: string, password: string): Promise<void> {
+  const cleanUsername = username.trim();
+  if (!cleanUsername || !password.trim()) {
+    throw new Error('Username and password are required.');
+  }
+
+  const payload = await serverService.signin(cleanUsername, password);
+  applyAuthPayload(payload);
+  await refreshModels();
+}
+
+async function signout(): Promise<void> {
+  const token = state.token.trim();
+  try {
+    if (token && serverService.isConfigured()) {
+      await serverService.signout(token);
+    }
+  } finally {
+    clearAuthState();
+  }
 }
 
 function addFriend(): void {
-  const friend = createDefaultFriendDraft(state.models[0]?.id ?? 'your-model-id', randomId('friend'));
+  const friend = createDefaultFriendDraft(state.models[0]?.id ?? '', randomId('friend'));
   state.friends.push(friend);
   void writeFriendMemory(friend, '');
 }
@@ -1834,8 +2314,9 @@ function selectMyPanel(panel: MyPanel): void {
   state.last_opened_my_panel = panel;
 }
 
-function regenerateSummary(interval: SummaryInterval): void {
-  queueSummary(interval, new Date().toISOString(), true);
+async function regenerateSummary(interval: SummaryInterval): Promise<void> {
+  queueSummary(interval, new Date().toISOString(), true, false);
+  await persistStateAndScheduleAiPump();
 }
 
 const latestAiFailure = computed(() => {
@@ -1868,6 +2349,23 @@ export async function initializeAppStore(): Promise<void> {
   await hydrateAssets(next.events);
   replaceState(next);
   await ensureFriendMemoryFiles(next.friends);
+
+  if (state.token.trim()) {
+    if (isAuthExpired()) {
+      clearAuthState();
+    } else if (serverService.isConfigured()) {
+      try {
+        await refreshModels();
+      } catch (error) {
+        if (isAuthServerError(error)) {
+          clearAuthState();
+        } else {
+          console.error('Failed to refresh server models during bootstrap.', error);
+        }
+      }
+    }
+  }
+
   bootstrapped = true;
   if (legacyRaw && typeof localStorage !== 'undefined') {
     localStorage.removeItem(LEGACY_STORAGE_KEY);
@@ -1875,11 +2373,12 @@ export async function initializeAppStore(): Promise<void> {
   }
   runDueTaskFailures();
   await syncAllTaskNotifications();
-  ensureDailySummaries();
+  ensureDailySummaries(false, false);
   ensureDiaryBook();
-  scheduleAiPump();
   scheduleTaskDeadlinePump();
   scheduleSummaryCheckPump();
+  await persistState();
+  scheduleAiPump();
 }
 
 export function useAppStore(): {
@@ -1911,8 +2410,12 @@ export function useAppStore(): {
   latestAiFailure: typeof latestAiFailure;
   regenerateSummary: typeof regenerateSummary;
   selectMyPanel: typeof selectMyPanel;
-  addModel: typeof addModel;
-  removeModel: typeof removeModel;
+  signup: typeof signup;
+  signin: typeof signin;
+  signout: typeof signout;
+  refreshModels: typeof refreshModels;
+  hasActiveSession: typeof hasActiveSession;
+  isModelAvailable: typeof isModelAvailable;
   addFriend: typeof addFriend;
   removeFriend: typeof removeFriend;
   exportJsonSnapshot: typeof exportJsonSnapshot;
@@ -1951,8 +2454,12 @@ export function useAppStore(): {
     latestAiFailure,
     regenerateSummary,
     selectMyPanel,
-    addModel,
-    removeModel,
+    signup,
+    signin,
+    signout,
+    refreshModels,
+    hasActiveSession,
+    isModelAvailable,
     addFriend,
     removeFriend,
     exportJsonSnapshot,

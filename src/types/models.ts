@@ -3,7 +3,9 @@ export type AssetType = 'image' | 'video' | 'audio';
 export type SummaryInterval = '7d' | '3m' | '1y';
 export type MyPanel = 'mailbox' | 'diary' | 'setting' | 'data';
 export type AiJobType = 'enrich_event' | 'friend_comment' | 'summary' | 'arrange_tags';
-export type AiJobStatus = 'pending' | 'done' | 'failed';
+export type RemoteTaskStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'acknowledged';
+export type RunnableAiJobStatus = 'create_remote_task' | 'poll_remote_task' | 'apply_remote_result' | 'ack_remote_task';
+export type AiJobStatus = RunnableAiJobStatus | 'waiting_retry' | 'done' | 'failed';
 export type DiaryPaperSize = 'B5' | 'B6';
 
 export interface LocationPayload {
@@ -77,9 +79,6 @@ export interface FriendRecord {
 export interface ModelRecord {
   id: string;
   name: string;
-  base_url: string;
-  api_key: string;
-  img_dealing: boolean;
 }
 
 export interface SummaryMeta {
@@ -127,7 +126,16 @@ export interface PendingAiJob {
   type: AiJobType;
   status: AiJobStatus;
   run_at: string;
-  retries: number;
+  retry_count: number;
+  resume_status?: RunnableAiJobStatus;
+  client_request_id?: string;
+  remote_task_id?: string;
+  remote_status?: RemoteTaskStatus;
+  remote_error_code?: string;
+  remote_response?: string;
+  remote_created_at?: string;
+  remote_started_at?: string;
+  remote_finished_at?: string;
   payload: Record<string, unknown>;
   last_error?: string;
 }
@@ -238,6 +246,9 @@ export interface AppState {
   schema_version: number;
   config: AppConfig;
   token: string;
+  auth_user_id: string;
+  auth_username: string;
+  auth_expires_at: string | null;
   models: ModelRecord[];
   friends: FriendRecord[];
   tags: Tag[];

@@ -5,3 +5,10 @@ declare module '*.vue' {
   export default component;
 }
 
+interface ImportMetaEnv {
+  readonly VITE_SERVER_BASE_URL?: string;
+}
+
+interface ImportMeta {
+  readonly env: ImportMetaEnv;
+}

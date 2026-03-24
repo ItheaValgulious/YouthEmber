@@ -75,8 +75,8 @@ const ui = useUiPreferences();
 const draft = ref('');
 const dueAt = ref('');
 
-function createTask(): void {
-  const created = store.createTaskFromText(draft.value, fromDateTimeLocalValue(dueAt.value));
+async function createTask(): Promise<void> {
+  const created = await store.createTaskFromText(draft.value, fromDateTimeLocalValue(dueAt.value));
   if (!created) {
     window.alert(ui.t('enter_task_content_first'));
     return;

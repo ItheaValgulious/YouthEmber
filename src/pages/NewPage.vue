@@ -305,7 +305,7 @@ async function submit(): Promise<void> {
       tags.push(locationService.buildLocationTag(currentLocation.value));
     }
 
-    store.createEvent({
+    await store.createEvent({
       title: '',
       raw: raw.value,
       tags,

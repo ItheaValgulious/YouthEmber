@@ -198,13 +198,13 @@ const displayTitle = computed(() => {
   return ui.state.locale === 'zh-CN' ? '书写中' : 'Writing';
 });
 
-function submitComment(): void {
+async function submitComment(): Promise<void> {
   const target = event.value;
   if (!target || !commentDraft.value.trim()) {
     return;
   }
 
-  store.addComment(target.id, commentDraft.value);
+  await store.addComment(target.id, commentDraft.value);
   commentDraft.value = '';
 }
 

@@ -1,9 +1,6 @@
-import { CapacitorHttp } from '@capacitor/core';
-
 import {
   buildEventEnrichmentPrompt,
   buildFriendCommentPrompt,
-  buildImageSummaryPrompt,
   buildSummaryPrompt,
   buildTagArrangePrompt,
   type PromptBundle,
@@ -14,7 +11,6 @@ import type {
   EventRecord,
   FriendRecord,
   LocationPayload,
-  ModelRecord,
   SummaryInterval,
   Tag,
   TagType,
@@ -46,7 +42,7 @@ export interface SummaryGenerationResult {
   overall_summary: string;
 }
 
-interface SummaryGenerationInput {
+export interface SummaryGenerationInput {
   interval: SummaryInterval;
   rangeLabel: string;
   taskCounts: {
@@ -66,52 +62,43 @@ interface SummaryGenerationInput {
     dailyTotals: Array<{ date: string; total: number }>;
   };
   highlights: Array<{
+    id?: string;
     time: string | null;
     title: string;
     raw: string;
     tags: string[];
     comment_count: number;
     task_state: 'event' | 'ongoing' | 'finished' | 'failed';
-    image_summary?: string;
   }>;
 }
 
-type ChatMessageContent =
-  | string
-  | Array<
-      | {
-          type: 'text';
-          text: string;
-        }
-      | {
-          type: 'image_url';
-          image_url: {
-            url: string;
-          };
-        }
-    >;
-
-interface ChatCompletionResponse {
-  choices?: Array<{
-    message?: {
-      content?:
-        | string
-        | Array<{
-            type?: string;
-            text?: string;
-          }>;
-    };
-  }>;
-  error?: {
-    message?: string;
+export interface BuiltAiTaskRequest {
+  modelId: string;
+  requestBody: {
+    messages: RequestMessage[];
+    temperature: number;
+    max_tokens: number;
   };
 }
 
-interface StructuredRequestResponse {
-  ok: boolean;
-  status: number;
-  rawText: string;
-}
+type TextContentPart = {
+  type: 'text';
+  text: string;
+};
+
+type ImageContentPart = {
+  type: 'image_url';
+  image_url: {
+    url: string;
+  };
+};
+
+type RequestMessageContent = string | Array<TextContentPart | ImageContentPart>;
+
+type RequestMessage = {
+  role: 'system' | 'user' | 'assistant';
+  content: RequestMessageContent;
+};
 
 function stripCodeFence(value: string): string {
   const trimmed = value.trim();
@@ -141,12 +128,12 @@ function parseStructuredContent(value: string): unknown {
     }
   }
 
-  throw new Error('AI 返回了无法解析的 JSON');
+  throw new Error('AI returned JSON that could not be parsed.');
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error('AI 返回结构不符合预期');
+    throw new Error('AI returned a response with an unexpected structure.');
   }
 
   return value as Record<string, unknown>;
@@ -154,7 +141,7 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function asString(value: unknown, field: string): string {
   if (typeof value !== 'string') {
-    throw new Error(`AI 返回缺少字符串字段：${field}`);
+    throw new Error(`AI response is missing string field: ${field}`);
   }
 
   return value.trim();
@@ -162,7 +149,7 @@ function asString(value: unknown, field: string): string {
 
 function asNumber(value: unknown, field: string): number {
   if (typeof value !== 'number' || Number.isNaN(value)) {
-    throw new Error(`AI 返回缺少数字字段：${field}`);
+    throw new Error(`AI response is missing number field: ${field}`);
   }
 
   return value;
@@ -199,7 +186,7 @@ function normalizePayload(value: unknown): LocationPayload | null {
 
 function normalizeTagDrafts(value: unknown, limit: number): AiTagDraft[] {
   if (!Array.isArray(value)) {
-    throw new Error('AI 返回的 tags 不是数组');
+    throw new Error('AI response field tags is not an array.');
   }
 
   const allowedTypes = new Set<TagType>(['nature', 'mood', 'others', 'people', 'location']);
@@ -232,40 +219,33 @@ function normalizeTagDrafts(value: unknown, limit: number): AiTagDraft[] {
     .slice(0, limit);
 }
 
-function extractMessageContent(payload: ChatCompletionResponse): string {
-  const content = payload.choices?.[0]?.message?.content;
-  if (typeof content === 'string') {
-    return content.trim();
-  }
-
-  if (Array.isArray(content)) {
-    const text = content
-      .map((part) => (typeof part?.text === 'string' ? part.text : ''))
-      .join('\n')
-      .trim();
-
-    if (text) {
-      return text;
-    }
-  }
-
-  throw new Error(payload.error?.message || 'AI 没有返回可解析的内容');
+function buildRequestBody(
+  prompt: PromptBundle,
+  options: {
+    temperature: number;
+    maxTokens: number;
+    primaryUserContent?: RequestMessageContent;
+    extraMessages?: RequestMessage[];
+  },
+): BuiltAiTaskRequest['requestBody'] {
+  return {
+    temperature: options.temperature,
+    max_tokens: options.maxTokens,
+    messages: [
+      {
+        role: 'system',
+        content: prompt.system,
+      },
+      {
+        role: 'user',
+        content: options.primaryUserContent ?? prompt.user,
+      },
+      ...(options.extraMessages ?? []),
+    ],
+  };
 }
 
-function resolveChatCompletionsUrl(baseUrl: string): string {
-  const normalized = baseUrl.trim().replace(/\/+$/, '');
-  if (!normalized) {
-    throw new Error('AI 模型 base_url 未配置');
-  }
-
-  if (/\/chat\/completions$/i.test(normalized)) {
-    return normalized;
-  }
-
-  return `${normalized}/chat/completions`;
-}
-
-function buildVisionUserContent(text: string, imageUrls: string[]): ChatMessageContent {
+function buildVisionUserContent(text: string, imageUrls: string[]): RequestMessageContent {
   return [
     {
       type: 'text',
@@ -278,106 +258,25 @@ function buildVisionUserContent(text: string, imageUrls: string[]): ChatMessageC
           image_url: {
             url,
           },
-        }) as const,
+        }) satisfies ImageContentPart,
     ),
   ];
 }
 
+function truncateText(value: string, maxLength: number): string {
+  const normalized = value.replace(/\s+/g, ' ').trim();
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, maxLength)}...`;
+}
+
+function eventHasImageAssets(event: EventRecord): boolean {
+  return event.assets.some((asset) => asset.type === 'image');
+}
+
 class AiService {
-  private async sendStructuredRequest(
-    url: string,
-    headers: Record<string, string>,
-    body: Record<string, unknown>,
-  ): Promise<StructuredRequestResponse> {
-    const response = await CapacitorHttp.request({
-      method: 'POST',
-      url,
-      headers,
-      data: body,
-      responseType: 'text',
-      connectTimeout: 30_000,
-      readTimeout: 60_000,
-    });
-
-    return {
-      ok: response.status >= 200 && response.status < 300,
-      status: response.status,
-      rawText: typeof response.data === 'string' ? response.data : JSON.stringify(response.data ?? null),
-    };
-  }
-
-  private async requestStructured<T>(input: {
-    model: ModelRecord;
-    prompt: PromptBundle;
-    temperature: number;
-    maxTokens: number;
-    validate: (value: unknown) => T;
-    userContent?: ChatMessageContent;
-  }): Promise<T> {
-    const modelId = input.model.id.trim();
-    if (!modelId) {
-      throw new Error('AI 模型 id 未配置');
-    }
-
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-    };
-
-    if (input.model.api_key.trim()) {
-      headers.Authorization = `Bearer ${input.model.api_key.trim()}`;
-    }
-
-    const requestUrl = resolveChatCompletionsUrl(input.model.base_url);
-    const requestBody = {
-      model: modelId,
-      temperature: input.temperature,
-      max_tokens: input.maxTokens,
-      messages: [
-        {
-          role: 'system',
-          content: input.prompt.system,
-        },
-        {
-          role: 'user',
-          content: input.userContent ?? input.prompt.user,
-        },
-      ],
-    };
-
-    let response: StructuredRequestResponse;
-    try {
-      response = await this.sendStructuredRequest(requestUrl, headers, requestBody);
-    } catch (error) {
-      console.error('AI request failed before a response was received.', {
-        url: requestUrl,
-        model: modelId,
-        baseUrl: input.model.base_url,
-        error,
-      });
-      throw error;
-    }
-
-    const rawText = response.rawText;
-    let payload: ChatCompletionResponse;
-
-    try {
-      payload = JSON.parse(rawText) as ChatCompletionResponse;
-    } catch {
-      if (!response.ok) {
-        throw new Error(rawText || `AI 请求失败：${response.status}`);
-      }
-
-      throw new Error('AI 响应不是合法 JSON');
-    }
-
-    if (!response.ok) {
-      throw new Error(payload.error?.message || `AI 请求失败：${response.status}`);
-    }
-
-    const parsed = parseStructuredContent(extractMessageContent(payload));
-    return input.validate(parsed);
-  }
-
   private async toImageUrls(images: AssetRecord[]): Promise<string[]> {
     return Promise.all(
       images
@@ -387,72 +286,78 @@ class AiService {
     );
   }
 
-  async summarizeImages(input: {
-    model: ModelRecord;
-    images: AssetRecord[];
-    purpose: 'friend_comment' | 'event_enrichment' | 'summary' | 'arrange_tags';
-  }): Promise<string> {
-    const imageUrls = await this.toImageUrls(input.images);
-    if (!imageUrls.length) {
-      return '';
+  private async buildEventVisualMessages(events: EventRecord[]): Promise<RequestMessage[]> {
+    const messages: RequestMessage[] = [];
+
+    for (const event of events) {
+      if (!eventHasImageAssets(event)) {
+        continue;
+      }
+
+      const imageUrls = await this.toImageUrls(event.assets);
+      if (!imageUrls.length) {
+        continue;
+      }
+
+      messages.push({
+        role: 'user',
+        content: buildVisionUserContent(
+          [
+            'Visual context for one event follows.',
+            JSON.stringify(
+              {
+                event_id: event.id,
+                title: truncateText(event.title, 80),
+                raw: truncateText(event.raw, 200),
+                time: event.time,
+                comment_count: event.comments.length,
+              },
+              null,
+              2,
+            ),
+          ].join('\n\n'),
+          imageUrls,
+        ),
+      });
     }
 
-    return this.requestStructured({
-      model: input.model,
-      prompt: buildImageSummaryPrompt({
-        imageCount: imageUrls.length,
-        purpose: input.purpose,
-      }),
-      userContent: buildVisionUserContent(
-        buildImageSummaryPrompt({
-          imageCount: imageUrls.length,
-          purpose: input.purpose,
-        }).user,
-        imageUrls,
-      ),
-      temperature: 0.2,
-      maxTokens: 1200,
-      validate: (value) => {
-        const record = asRecord(value);
-        return asString(record.summary, 'summary');
-      },
-    });
+    return messages;
   }
 
-  async enrichEvent(input: {
-    model: ModelRecord;
+  async buildEventEnrichmentTask(input: {
+    modelId: string;
     event: EventRecord;
     existingTags: Tag[];
     isTask: boolean;
-    imageSummary?: string;
-    attachImages?: boolean;
-  }): Promise<EventEnrichmentResult> {
+  }): Promise<BuiltAiTaskRequest> {
     const prompt = buildEventEnrichmentPrompt(input);
-    const imageUrls = input.attachImages ? await this.toImageUrls(input.event.assets) : [];
+    const imageUrls = await this.toImageUrls(input.event.assets);
 
-    return this.requestStructured({
-      model: input.model,
-      prompt,
-      userContent: imageUrls.length ? buildVisionUserContent(prompt.user, imageUrls) : undefined,
-      temperature: 0.3,
-      maxTokens: 900,
-      validate: (value) => {
-        const record = asRecord(value);
-        const title = typeof record.title === 'string' ? record.title.trim() : '';
-        const tags = normalizeTagDrafts(record.tags ?? [], 8).filter(
-          (tag) => !['task', 'ongoing', 'finished', 'not_finished'].includes(tag.label.trim().toLowerCase()),
-        );
-
-        return {
-          title,
-          tags,
-        };
-      },
-    });
+    return {
+      modelId: input.modelId,
+      requestBody: buildRequestBody(prompt, {
+        temperature: 0.3,
+        maxTokens: 900,
+        primaryUserContent: imageUrls.length ? buildVisionUserContent(prompt.user, imageUrls) : undefined,
+      }),
+    };
   }
 
-  async generateFriendComment(input: {
-    model: ModelRecord;
+  parseEventEnrichment(rawText: string): EventEnrichmentResult {
+    const record = asRecord(parseStructuredContent(rawText));
+    const title = typeof record.title === 'string' ? record.title.trim() : '';
+    const tags = normalizeTagDrafts(record.tags ?? [], 8).filter(
+      (tag) => !['task', 'ongoing', 'finished', 'not_finished'].includes(tag.label.trim().toLowerCase()),
+    );
+
+    return {
+      title,
+      tags,
+    };
+  }
+
+  async buildFriendCommentTask(input: {
+    modelId: string;
     event: EventRecord;
     friend: FriendRecord;
     isTask: boolean;
@@ -460,77 +365,89 @@ class AiService {
     memory: string;
     memoryMaxLength: number;
     repliedComment?: CommentRecord | null;
-    imageSummary?: string;
-    attachImages?: boolean;
-  }): Promise<FriendCommentResult> {
+  }): Promise<BuiltAiTaskRequest> {
     const prompt = buildFriendCommentPrompt(input);
-    const imageUrls = input.attachImages ? await this.toImageUrls(input.event.assets) : [];
+    const imageUrls = await this.toImageUrls(input.event.assets);
 
-    return this.requestStructured({
-      model: input.model,
-      prompt,
-      userContent: imageUrls.length ? buildVisionUserContent(prompt.user, imageUrls) : undefined,
-      temperature: 0.8,
-      maxTokens: 1600,
-      validate: (value) => {
-        const record = asRecord(value);
-        const attitude = Math.min(1, Math.max(0, asNumber(record.attitude, 'attitude')));
-        const comment = asString(record.comment, 'comment');
-        const memory = asString(record.memory, 'memory');
-
-        if (!comment) {
-          throw new Error('AI 返回了空评论');
-        }
-
-        return {
-          attitude: Number(attitude.toFixed(2)),
-          comment,
-          memory,
-        };
-      },
-    });
+    return {
+      modelId: input.modelId,
+      requestBody: buildRequestBody(prompt, {
+        temperature: 0.8,
+        maxTokens: 1600,
+        primaryUserContent: imageUrls.length ? buildVisionUserContent(prompt.user, imageUrls) : undefined,
+      }),
+    };
   }
 
-  async arrangeTags(input: {
-    model: ModelRecord;
+  parseFriendComment(rawText: string): FriendCommentResult {
+    const record = asRecord(parseStructuredContent(rawText));
+    const attitude = Math.min(1, Math.max(0, asNumber(record.attitude, 'attitude')));
+    const comment = asString(record.comment, 'comment');
+    const memory = asString(record.memory, 'memory');
+
+    if (!comment) {
+      throw new Error('AI returned an empty comment.');
+    }
+
+    return {
+      attitude: Number(attitude.toFixed(2)),
+      comment,
+      memory,
+    };
+  }
+
+  async buildArrangeTagsTask(input: {
+    modelId: string;
     recentEvents: EventRecord[];
     existingTags: Tag[];
-    imageSummaryByEventId?: Record<string, string>;
-  }): Promise<AiTagDraft[]> {
-    return this.requestStructured({
-      model: input.model,
-      prompt: buildTagArrangePrompt(input),
-      temperature: 0.2,
-      maxTokens: 700,
-      validate: (value) => {
-        const record = asRecord(value);
-        return normalizeTagDrafts(record.tags ?? [], 3).filter(
-          (tag) => !['task', 'ongoing', 'finished', 'not_finished'].includes(tag.label.trim().toLowerCase()),
-        );
-      },
-    });
+  }): Promise<BuiltAiTaskRequest> {
+    const prompt = buildTagArrangePrompt(input);
+    const extraMessages = await this.buildEventVisualMessages(input.recentEvents.slice(0, 12));
+
+    return {
+      modelId: input.modelId,
+      requestBody: buildRequestBody(prompt, {
+        temperature: 0.2,
+        maxTokens: 700,
+        extraMessages,
+      }),
+    };
   }
 
-  async generateSummary(input: {
-    model: ModelRecord;
-    summary: SummaryGenerationInput;
-  }): Promise<SummaryGenerationResult> {
-    return this.requestStructured({
-      model: input.model,
-      prompt: buildSummaryPrompt(input.summary),
-      temperature: 0.5,
-      maxTokens: 900,
-      validate: (value) => {
-        const record = asRecord(value);
+  parseArrangeTags(rawText: string): AiTagDraft[] {
+    const record = asRecord(parseStructuredContent(rawText));
+    return normalizeTagDrafts(record.tags ?? [], 3).filter(
+      (tag) => !['task', 'ongoing', 'finished', 'not_finished'].includes(tag.label.trim().toLowerCase()),
+    );
+  }
 
-        return {
-          title: asString(record.title, 'title'),
-          task_summary: asString(record.task_summary, 'task_summary'),
-          mood_summary: asString(record.mood_summary, 'mood_summary'),
-          overall_summary: asString(record.overall_summary, 'overall_summary'),
-        };
-      },
-    });
+  async buildSummaryTask(input: {
+    modelId: string;
+    summary: SummaryGenerationInput;
+    relevantEvents: EventRecord[];
+  }): Promise<BuiltAiTaskRequest> {
+    const prompt = buildSummaryPrompt(input.summary);
+    const extraMessages = await this.buildEventVisualMessages(input.relevantEvents.slice(0, 12));
+
+    return {
+      modelId: input.modelId,
+      requestBody: buildRequestBody(prompt, {
+        temperature: 0.5,
+        maxTokens: 900,
+        extraMessages,
+      }),
+    };
+  }
+
+  parseSummary(rawText: string): SummaryGenerationResult {
+    const record = asRecord(parseStructuredContent(rawText));
+
+    return {
+      title: asString(record.title, 'title'),
+      task_summary: asString(record.task_summary, 'task_summary'),
+      mood_summary: asString(record.mood_summary, 'mood_summary'),
+      overall_summary: asString(record.overall_summary, 'overall_summary'),
+    };
   }
 }
 
