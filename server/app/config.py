@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -32,12 +33,25 @@ class Settings:
     data_dir: Path
     db_path: Path
     models_seed_path: Path
+    server_config_path: Path
     cors_allowed_origins: tuple[str, ...]
     auth_token_ttl_days: int
+    default_user_quota: int
     worker_thread_count: int
     worker_poll_interval_seconds: float
     worker_retry_delays_seconds: tuple[int, ...]
     upstream_timeout_seconds: float
+
+
+def _load_json_config(path: Path) -> dict[str, object]:
+    if not path.exists():
+        return {}
+
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"Config file must contain a JSON object: {path}")
+
+    return payload
 
 
 def load_settings() -> Settings:
@@ -46,6 +60,11 @@ def load_settings() -> Settings:
     data_dir = base_dir / "data"
     default_db_path = data_dir / "ashdairy.db"
     default_models_seed_path = base_dir / "config" / "models.json"
+    default_server_config_path = base_dir / "config" / "server.json"
+    server_config_path = Path(
+        os.getenv("ASHDAIRY_SERVER_CONFIG_PATH", str(default_server_config_path))
+    )
+    server_config = _load_json_config(server_config_path)
     cors_allowed_origins_raw = os.getenv(
         "ASHDAIRY_SERVER_CORS_ALLOWED_ORIGINS",
         "http://127.0.0.1:5173,http://localhost:5173,http://localhost,capacitor://localhost,ionic://localhost",
@@ -62,6 +81,15 @@ def load_settings() -> Settings:
         1,
         int(os.getenv("ASHDAIRY_SERVER_WORKER_THREAD_COUNT", "3")),
     )
+    default_user_quota = max(
+        0,
+        int(
+            os.getenv(
+                "ASHDAIRY_SERVER_DEFAULT_USER_QUOTA",
+                str(server_config.get("default_user_quota", 0)),
+            )
+        ),
+    )
 
     return Settings(
         base_dir=base_dir,
@@ -70,8 +98,10 @@ def load_settings() -> Settings:
         models_seed_path=Path(
             os.getenv("ASHDAIRY_SERVER_MODELS_SEED_PATH", str(default_models_seed_path))
         ),
+        server_config_path=server_config_path,
         cors_allowed_origins=cors_allowed_origins,
         auth_token_ttl_days=int(os.getenv("ASHDAIRY_SERVER_AUTH_TOKEN_TTL_DAYS", "30")),
+        default_user_quota=default_user_quota,
         worker_thread_count=worker_thread_count,
         worker_poll_interval_seconds=float(
             os.getenv("ASHDAIRY_SERVER_WORKER_POLL_INTERVAL_SECONDS", "1")

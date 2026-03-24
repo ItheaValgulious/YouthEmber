@@ -85,3 +85,27 @@ python -m venv .venv
 - `ASHDAIRY_SERVER_WORKER_POLL_INTERVAL_SECONDS`
 - `ASHDAIRY_SERVER_WORKER_RETRY_DELAYS`
 - `ASHDAIRY_SERVER_UPSTREAM_TIMEOUT_SECONDS`
+
+## Quota Configuration
+
+- Default signup quota is read from `config/server.json`.
+- Example config:
+
+```json
+{
+  "default_user_quota": 0
+}
+```
+
+- You can override the config path with `ASHDAIRY_SERVER_CONFIG_PATH`.
+- You can override the default quota with `ASHDAIRY_SERVER_DEFAULT_USER_QUOTA`.
+
+## Quota Debug Tool
+
+Run the interactive quota helper with the project venv:
+
+```powershell
+.\.venv\Scripts\python.exe .\grant_quota.py
+```
+
+The script will prompt for the username and the quota increment amount, then print the quota before and after the update.

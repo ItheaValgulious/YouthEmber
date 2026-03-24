@@ -131,9 +131,10 @@ def init_db(settings: Settings) -> None:
         connection.execute(
             """
             UPDATE users
-            SET quota = 0
+            SET quota = ?
             WHERE quota IS NULL;
-            """
+            """,
+            (settings.default_user_quota,),
         )
         connection.execute(
             """

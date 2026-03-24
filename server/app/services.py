@@ -35,6 +35,14 @@ class CurrentUser:
     username: str
 
 
+@dataclass
+class UserQuotaSummary:
+    id: str
+    username: str
+    quota_before: int
+    quota_after: int
+
+
 def provider_from_baseurl(baseurl: str) -> str:
     normalized = baseurl.strip().lower()
     host = urlparse(normalized).netloc or normalized
@@ -299,15 +307,17 @@ def signup(settings: Settings, username: str, password: str) -> dict[str, Any]:
                 password_hash,
                 auth_token_hash,
                 auth_token_expires_at,
+                quota,
                 created_at,
                 updated_at,
                 last_signin_at
-            ) VALUES (?, ?, ?, NULL, NULL, ?, ?, NULL);
+            ) VALUES (?, ?, ?, NULL, NULL, ?, ?, ?, NULL);
             """,
             (
                 user_id,
                 username,
                 hash_password(password),
+                settings.default_user_quota,
                 now,
                 now,
             ),
@@ -345,6 +355,57 @@ def signin(settings: Settings, username: str, password: str) -> dict[str, Any]:
         )
         connection.commit()
         return payload
+
+
+def add_user_quota(
+    settings: Settings,
+    *,
+    username: str,
+    amount: int,
+) -> UserQuotaSummary:
+    normalized_username = username.strip()
+    if not normalized_username:
+        raise AppError(400, "username_invalid", "Username is required.")
+
+    if amount <= 0:
+        raise AppError(400, "quota_amount_invalid", "Quota amount must be greater than 0.")
+
+    now = utc_now_iso()
+    with connection_scope(settings) as connection:
+        row = connection.execute(
+            """
+            SELECT id, username, quota
+            FROM users
+            WHERE username = ?
+            LIMIT 1;
+            """,
+            (normalized_username,),
+        ).fetchone()
+        if row is None:
+            raise AppError(404, "user_not_found", "User does not exist.")
+
+        quota_before = row["quota"]
+        if not isinstance(quota_before, int):
+            quota_before = int(quota_before or 0)
+        quota_after = quota_before + amount
+
+        connection.execute(
+            """
+            UPDATE users
+            SET quota = ?,
+                updated_at = ?
+            WHERE id = ?;
+            """,
+            (quota_after, now, row["id"]),
+        )
+        connection.commit()
+
+        return UserQuotaSummary(
+            id=str(row["id"]),
+            username=str(row["username"]),
+            quota_before=quota_before,
+            quota_after=quota_after,
+        )
 
 
 def get_current_user(settings: Settings, raw_token: str) -> CurrentUser:
