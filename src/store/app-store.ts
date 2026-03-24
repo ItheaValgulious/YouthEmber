@@ -13,10 +13,17 @@ import {
 import { addDays, compareIsoDesc, diffDays, endOfDay, formatDateTime, toDateKey } from '../lib/date';
 import { buildDiaryBook, getDiaryBookVersion } from '../lib/diary-book';
 import { buildDiaryHtml, buildMailBundleHtml, buildSummaryMailHtml } from '../lib/exporters';
-import { dedupeTags, hasTagLabel, mergeTagCatalog, normalizeLabel, sortTagsForDisplay } from '../lib/tag';
+import { dedupeTags, mergeTagCatalog, normalizeLabel, sortTagsForDisplay } from '../lib/tag';
 import { aiService, databaseService, fileService, notificationService, serverService, ServerError } from '../services';
 import type { AiTagDraft, SummaryGenerationInput, SummaryGenerationResult } from '../services/ai-service';
-import { restoreUiPreferences, snapshotUiPreferences, t as uiText, type UiPreferencesSnapshot } from '../ui/preferences';
+import {
+  createDefaultUiPreferencesSnapshot,
+  normalizeUiPreferencesSnapshot,
+  restoreUiPreferences,
+  snapshotUiPreferences,
+  t as uiText,
+  type UiPreferencesSnapshot,
+} from '../ui/preferences';
 import type {
   AppState,
   AppStateAssetExport,
@@ -37,14 +44,15 @@ import type {
   SummaryRecord,
   Tag,
   TagType,
+  TaskStatus,
 } from '../types/models';
 
-const LEGACY_STORAGE_KEY = 'ashdairy.state.v1';
 const RETRY_DELAYS = [60_000, 5 * 60_000, 10 * 60_000];
 const REMOTE_POLL_INTERVAL_MS = 2_000;
 const DEMO_DELAY_UNIT_MS = 120;
 const FRIEND_MEMORY_MAX_CHARS = 100_000;
 const PRIMARY_MODEL_PREFERENCES = ['deepseek-v3', 'qwen3vl'];
+const TASK_SYSTEM_LABELS = new Set(['task', 'ongoing', 'finished', 'not_finished']);
 const SUMMARY_WINDOWS: Record<SummaryInterval, number> = {
   '7d': 7,
   '3m': 90,
@@ -63,6 +71,7 @@ let bootstrapped = false;
 let diaryBookTimer: number | null = null;
 let aiPumpRunning = false;
 let persistChain = Promise.resolve();
+let persistenceSuspended = false;
 let primedComposerAssets: AssetRecord[] = [];
 
 interface FriendCommentTrigger {
@@ -88,6 +97,36 @@ function cloneTag(tag: Tag): Tag {
     ...tag,
     payload: tag.payload ? { ...tag.payload } : null,
   };
+}
+
+function isTaskStatus(value: unknown): value is Exclude<TaskStatus, null> {
+  return value === 'ongoing' || value === 'finished' || value === 'not_finished';
+}
+
+function defaultTaskSystemTag(label: 'task' | Exclude<TaskStatus, null>): Tag {
+  const existing = createDefaultTags().find((tag) => normalizeLabel(tag.label) === label);
+  if (!existing) {
+    throw new Error(`Missing default system tag for ${label}.`);
+  }
+
+  return cloneTag(existing);
+}
+
+function buildTaskRuntimeTags(baseTags: Tag[], isTaskRecord: boolean, taskStatus: TaskStatus): Tag[] {
+  const filtered = baseTags
+    .filter((tag) => !TASK_SYSTEM_LABELS.has(normalizeLabel(tag.label)))
+    .map(cloneTag);
+
+  if (!isTaskRecord) {
+    return dedupeTags(filtered);
+  }
+
+  const nextTags = [...filtered, defaultTaskSystemTag('task')];
+  if (taskStatus) {
+    nextTags.push(defaultTaskSystemTag(taskStatus));
+  }
+
+  return dedupeTags(nextTags);
 }
 
 function cloneEvent(event: EventRecord): EventRecord {
@@ -190,13 +229,18 @@ function normalizeFriend(raw: Partial<FriendRecord>, fallbackModelId: string): F
 }
 
 function normalizeEvent(raw: Partial<EventRecord>): EventRecord {
+  const isTaskRecord = raw.is_task === true;
+  const taskStatus = isTaskStatus(raw.task_status) ? raw.task_status : isTaskRecord ? 'ongoing' : null;
+
   return {
     id: raw.id ?? randomId('evt'),
     created_at: raw.created_at ?? new Date().toISOString(),
     time: raw.time ?? raw.created_at ?? new Date().toISOString(),
     title: raw.title ?? '',
     raw: raw.raw ?? '',
-    tags: Array.isArray(raw.tags) ? raw.tags.map(cloneTag) : [],
+    is_task: isTaskRecord,
+    task_status: taskStatus,
+    tags: buildTaskRuntimeTags(Array.isArray(raw.tags) ? raw.tags.map(cloneTag) : [], isTaskRecord, taskStatus),
     assets: Array.isArray(raw.assets) ? raw.assets.map(normalizeAsset) : [],
     comments: Array.isArray(raw.comments) ? raw.comments.map(normalizeComment) : [],
   };
@@ -280,19 +324,19 @@ function compareEventsDesc(left: EventRecord, right: EventRecord): number {
 }
 
 function isTask(event: EventRecord): boolean {
-  return hasTagLabel(event.tags, 'task');
+  return event.is_task;
 }
 
 function isFinishedTask(event: EventRecord): boolean {
-  return isTask(event) && hasTagLabel(event.tags, 'finished');
+  return event.is_task && event.task_status === 'finished';
 }
 
 function isFailedTask(event: EventRecord): boolean {
-  return isTask(event) && hasTagLabel(event.tags, 'not_finished');
+  return event.is_task && event.task_status === 'not_finished';
 }
 
 function isOngoingTask(event: EventRecord): boolean {
-  return isTask(event) && hasTagLabel(event.tags, 'ongoing') && !isFinishedTask(event) && !isFailedTask(event);
+  return event.is_task && event.task_status === 'ongoing';
 }
 
 function taskDeadlineAt(event: EventRecord): Date | null {
@@ -347,6 +391,8 @@ function createInitialState(): AppState {
     time: createdAt,
     title: '第一次遇见你',
     raw: '你好，我是 Ember。今天是我第一次在这里遇见你，先把这一刻轻轻记下来。',
+    is_task: false,
+    task_status: null,
     tags: dedupeTags(
       tags
         .filter((tag) => ['discovery'].includes(normalizeLabel(tag.label)))
@@ -357,7 +403,7 @@ function createInitialState(): AppState {
   };
 
   return {
-    schema_version: 3,
+    schema_version: 1,
     config: createDefaultConfig(),
     token: '',
     auth_user_id: '',
@@ -396,7 +442,9 @@ function normalizeState(raw: Partial<AppState> | undefined): AppState {
         : seed.config.summary_intervals,
   };
 
-  const tags = dedupeTags([...(raw.tags ?? []), ...seed.tags].map(cloneTag));
+  const normalizedEvents =
+    Array.isArray(raw.events) && raw.events.length ? raw.events.map(normalizeEvent) : seed.events.map(cloneEvent);
+  const tags = dedupeTags([...(raw.tags ?? []), ...normalizedEvents.flatMap((event) => event.tags), ...seed.tags].map(cloneTag));
   const models =
     Array.isArray(raw.models) && raw.models.length
       ? raw.models.map((item) => normalizeModel(item)).filter((item) => item.id !== 'deepseek-r1')
@@ -408,7 +456,7 @@ function normalizeState(raw: Partial<AppState> | undefined): AppState {
       : createDefaultFriends(fallbackModelId, models).map((item) => normalizeFriend(item, fallbackModelId));
 
   return {
-    schema_version: 3,
+    schema_version: 1,
     config,
     token: raw.token ?? '',
     auth_user_id: raw.auth_user_id ?? '',
@@ -417,7 +465,7 @@ function normalizeState(raw: Partial<AppState> | undefined): AppState {
     models,
     friends,
     tags,
-    events: Array.isArray(raw.events) && raw.events.length ? raw.events.map(normalizeEvent) : seed.events,
+    events: normalizedEvents,
     mails: Array.isArray(raw.mails) && raw.mails.length ? raw.mails.map(normalizeMail) : seed.mails,
     summaries: Array.isArray(raw.summaries) ? raw.summaries.map(normalizeSummary) : [],
     diary_book: normalizeDiaryBook(raw.diary_book),
@@ -443,9 +491,13 @@ function buildPersistedAsset(asset: AssetRecord): AssetRecord {
 
 function snapshotPersistedState(): AppState {
   const snapshot = snapshotState();
+  return snapshotPersistedStateFrom(snapshot);
+}
+
+function snapshotPersistedStateFrom(source: AppState): AppState {
   return {
-    ...snapshot,
-    events: snapshot.events.map((event) => ({
+    ...source,
+    events: source.events.map((event) => ({
       ...event,
       assets: event.assets.map(buildPersistedAsset),
     })),
@@ -465,35 +517,120 @@ async function hydrateAssets(events: EventRecord[]): Promise<void> {
   }
 }
 
-async function persistState(): Promise<void> {
-  if (!bootstrapped) {
+function enqueuePersistence(task: () => Promise<void>, force = false): Promise<void> {
+  if ((!bootstrapped && !force) || persistenceSuspended) {
+    return Promise.resolve();
+  }
+
+  persistChain = persistChain.catch(() => undefined).then(task);
+  return persistChain;
+}
+
+function snapshotPersistedMetaState(): Pick<
+  AppState,
+  'token' | 'auth_user_id' | 'auth_username' | 'auth_expires_at' | 'last_summary_check' | 'last_opened_my_panel'
+> {
+  return {
+    token: state.token,
+    auth_user_id: state.auth_user_id,
+    auth_username: state.auth_username,
+    auth_expires_at: state.auth_expires_at,
+    last_summary_check: state.last_summary_check,
+    last_opened_my_panel: state.last_opened_my_panel,
+  };
+}
+
+async function persistConfigState(force = false): Promise<void> {
+  const config = JSON.parse(JSON.stringify(state.config)) as AppState['config'];
+  await enqueuePersistence(() => databaseService.saveConfig(config), force);
+}
+
+async function persistMetaState(force = false): Promise<void> {
+  const meta = snapshotPersistedMetaState();
+  await enqueuePersistence(() => databaseService.saveMetaState(meta), force);
+}
+
+async function persistModelsAndFriendsState(force = false): Promise<void> {
+  const snapshot = snapshotState();
+  await enqueuePersistence(() => databaseService.saveModelsAndFriends(snapshot.models, snapshot.friends), force);
+}
+
+async function persistTagsAndEventsState(force = false): Promise<void> {
+  const snapshot = snapshotPersistedState();
+  await enqueuePersistence(() => databaseService.saveTagsAndEvents(snapshot.tags, snapshot.events), force);
+}
+
+async function persistMailsAndSummariesState(force = false): Promise<void> {
+  const snapshot = snapshotPersistedState();
+  await enqueuePersistence(() => databaseService.saveMailsAndSummaries(snapshot.mails, snapshot.summaries), force);
+}
+
+async function persistAiJobsState(force = false): Promise<void> {
+  const snapshot = snapshotPersistedState();
+  await enqueuePersistence(() => databaseService.saveAiJobs(snapshot.ai_jobs), force);
+}
+
+async function persistAllRelationalState(force = false): Promise<void> {
+  if ((!bootstrapped && !force) || persistenceSuspended) {
     return;
   }
 
-  const payload = snapshotPersistedState();
-  persistChain = persistChain
-    .catch(() => undefined)
-    .then(() => databaseService.saveAppState(payload));
-  await persistChain;
+  await persistConfigState(force);
+  await persistMetaState(force);
+  await persistModelsAndFriendsState(force);
+  await persistTagsAndEventsState(force);
+  await persistMailsAndSummariesState(force);
+  await persistAiJobsState(force);
 }
 
 async function persistStateAndScheduleAiPump(): Promise<void> {
-  await persistState();
+  await persistAllRelationalState();
   scheduleAiPump();
 }
 
-function schedulePersist(): void {
-  if (!bootstrapped) {
-    return;
-  }
-
-  void persistState();
-}
+watch(
+  () => state.config,
+  () => {
+    void persistConfigState();
+  },
+  { deep: true },
+);
 
 watch(
-  state,
+  () => [state.token, state.auth_user_id, state.auth_username, state.auth_expires_at, state.last_summary_check, state.last_opened_my_panel],
   () => {
-    schedulePersist();
+    void persistMetaState();
+  },
+);
+
+watch(
+  () => [state.models, state.friends],
+  () => {
+    void persistModelsAndFriendsState();
+  },
+  { deep: true },
+);
+
+watch(
+  () => [state.tags, state.events],
+  () => {
+    void persistTagsAndEventsState();
+  },
+  { deep: true },
+);
+
+watch(
+  () => [state.mails, state.summaries],
+  () => {
+    void persistMailsAndSummariesState();
+  },
+  { deep: true },
+);
+
+watch(
+  () => state.ai_jobs,
+  () => {
+    void persistAiJobsState();
   },
   { deep: true },
 );
@@ -610,6 +747,8 @@ function buildDiaryFingerprint(): string {
       time: event.time,
       title: event.title,
       raw: event.raw,
+      is_task: event.is_task,
+      task_status: event.task_status,
       assets: event.assets.map((asset) => ({
         id: asset.id,
         filepath: asset.filepath,
@@ -681,6 +820,10 @@ function scheduleDiaryBookRebuild(): void {
 
 function replaceReactiveArray<T>(target: T[], next: T[]): void {
   target.splice(0, target.length, ...next);
+}
+
+function syncRuntimeTaskTags(event: EventRecord): void {
+  event.tags = buildTaskRuntimeTags(event.tags, event.is_task, event.task_status);
 }
 
 function replaceState(next: AppState): void {
@@ -772,6 +915,7 @@ function mergeTagsIntoEvent(event: EventRecord, incoming: Tag[], time: string): 
   ]);
 
   event.tags = merged;
+  syncRuntimeTaskTags(event);
   replaceReactiveArray(state.tags, mergeTagCatalog(state.tags, incoming, time));
 }
 
@@ -1235,14 +1379,19 @@ function ensureDailySummaries(force = false, autoSchedule = true): void {
   const earliest = sortedEvents.value.at(-1);
   if (!earliest) {
     state.last_summary_check = todayKey;
+    if (bootstrapped && !persistenceSuspended) {
+      void persistMetaState();
+    }
     return;
   }
 
+  let queuedAny = false;
   let cursor = state.last_summary_check ? addDays(state.last_summary_check, 1) : new Date(earliest.created_at);
   while (toDateKey(cursor) <= todayKey) {
     state.config.summary_intervals.forEach((interval) => {
       if (shouldGenerateSummary(interval, cursor)) {
         queueSummary(interval, new Date(cursor).toISOString(), force, autoSchedule);
+        queuedAny = true;
       }
     });
 
@@ -1250,6 +1399,12 @@ function ensureDailySummaries(force = false, autoSchedule = true): void {
   }
 
   state.last_summary_check = todayKey;
+  if (bootstrapped && !persistenceSuspended) {
+    void persistMetaState();
+    if (queuedAny) {
+      void persistAiJobsState();
+    }
+  }
 }
 
 function scheduleTaskDeadlinePump(): void {
@@ -1300,6 +1455,8 @@ async function createEvent(payload: { title: string; raw: string; tags: Tag[]; a
     time: now,
     title: payload.title.trim(),
     raw: payload.raw.trim(),
+    is_task: false,
+    task_status: null,
     tags,
     assets: payload.assets.map((asset) => ({ ...asset })),
     comments: [],
@@ -1331,6 +1488,8 @@ async function createTaskFromText(text: string, dueAt: string | null): Promise<E
     time: dueAt,
     title: '',
     raw: clean,
+    is_task: true,
+    task_status: 'ongoing',
     tags,
     assets: [],
     comments: [],
@@ -1340,7 +1499,7 @@ async function createTaskFromText(text: string, dueAt: string | null): Promise<E
   queueEventEnrichment(event.id, false);
   arrangeTagsIfNeeded(false);
   ensureDailySummaries(false, false);
-  await persistState();
+  await persistAllRelationalState();
   void syncTaskNotification(event);
   scheduleTaskDeadlinePump();
   scheduleAiPump();
@@ -1386,11 +1545,13 @@ function updateTaskDueTime(eventId: string, dueAt: string | null): void {
   event.time = dueAt;
   void syncTaskNotification(event);
   scheduleTaskDeadlinePump();
+  void persistTagsAndEventsState();
 }
 
 function swapTaskState(event: EventRecord, nextTag: 'finished' | 'not_finished'): void {
-  event.tags = event.tags.filter((tag) => !['ongoing', 'finished', 'not_finished'].includes(normalizeLabel(tag.label)));
-  mergeTagsIntoEvent(event, [getSystemTag('task'), getSystemTag(nextTag)], new Date().toISOString());
+  event.is_task = true;
+  event.task_status = nextTag;
+  syncRuntimeTaskTags(event);
 }
 
 function completeTask(eventId: string): void {
@@ -1404,6 +1565,8 @@ function completeTask(eventId: string): void {
   swapTaskState(event, 'finished');
   scheduleTaskDeadlinePump();
   queueFriendJobs(event);
+  void persistTagsAndEventsState();
+  void persistAiJobsState();
 }
 
 function failTask(eventId: string): void {
@@ -1417,6 +1580,8 @@ function failTask(eventId: string): void {
   swapTaskState(event, 'not_finished');
   scheduleTaskDeadlinePump();
   queueFriendJobs(event);
+  void persistTagsAndEventsState();
+  void persistAiJobsState();
 }
 
 function summaryMetaKey(interval: SummaryInterval, rangeEnd: string): string {
@@ -1818,7 +1983,7 @@ async function createRemoteTaskForJob(job: PendingAiJob): Promise<void> {
   const clientRequestId = buildRemoteClientRequestId(job);
   if (job.client_request_id !== clientRequestId) {
     job.client_request_id = clientRequestId;
-    await persistState();
+    await persistAiJobsState();
   }
   const task = await serverService.createTask({
     token: state.token,
@@ -1828,7 +1993,7 @@ async function createRemoteTaskForJob(job: PendingAiJob): Promise<void> {
   });
   resetJobError(job);
   updateJobFromRemoteTask(job, task);
-  await persistState();
+  await persistAiJobsState();
 
   if (task.state === 'acknowledged') {
     completeJob(job);
@@ -2088,22 +2253,22 @@ async function runDueAiJobs(): Promise<void> {
     }
 
     if (shouldPersistBeforeCreate) {
-      await persistState();
+      await persistAiJobsState();
     }
 
     if (createRemoteTaskJobs.length) {
       await Promise.allSettled(createRemoteTaskJobs.map((job) => executeJob(job)));
-      await persistState();
+      await persistAllRelationalState();
     }
 
     for (const job of nonCreateJobs) {
       await executeJob(job);
-      await persistState();
+      await persistAllRelationalState();
     }
 
     state.ai_jobs = state.ai_jobs.filter((job) => job.status !== 'done').slice(-40);
     if (dueJobs.length) {
-      await persistState();
+      await persistAiJobsState();
     }
   } finally {
     aiPumpRunning = false;
@@ -2155,7 +2320,7 @@ async function buildAssetExportList(): Promise<AppStateAssetExport[]> {
 
 async function exportJsonSnapshot(): Promise<void> {
   const payload: AppStateExportBundle = {
-    schema_version: 3,
+    schema_version: 1,
     exported_at: new Date().toISOString(),
     data: snapshotPersistedState(),
     assets: await buildAssetExportList(),
@@ -2171,20 +2336,24 @@ async function exportJsonSnapshot(): Promise<void> {
 }
 
 async function importJsonSnapshot(text: string): Promise<void> {
-  const parsed = JSON.parse(text) as Partial<AppStateExportBundle> & {
+  const parsed = JSON.parse(text) as AppStateExportBundle & {
     data?: Partial<AppState>;
     ui_preferences?: Partial<UiPreferencesSnapshot>;
   };
 
-  if (![1, 2, 3].includes(parsed.schema_version ?? 1)) {
-    throw new Error('暂不支持该 schema_version');
+  if (parsed.schema_version !== 1) {
+    throw new Error('Only schema_version 1 is supported.');
+  }
+
+  if (!parsed.data || typeof parsed.data !== 'object') {
+    throw new Error('Invalid import bundle: missing data payload.');
   }
 
   if (!window.confirm('导入会覆盖当前本地数据，确定继续吗？')) {
     return;
   }
 
-  const next = normalizeState(parsed.data ?? (parsed as Partial<AppState>));
+  const next = normalizeState(parsed.data);
   const assetMap = new Map((parsed.assets ?? []).map((asset) => [asset.asset_id, asset]));
 
   for (const event of next.events) {
@@ -2198,8 +2367,13 @@ async function importJsonSnapshot(text: string): Promise<void> {
     event.assets = restoredAssets;
   }
 
+  persistenceSuspended = true;
   replaceState(next);
-  await restoreUiPreferences(parsed.ui_preferences);
+  persistenceSuspended = false;
+  await databaseService.clearAppMeta();
+  await restoreUiPreferences(
+    normalizeUiPreferencesSnapshot(parsed.ui_preferences, createDefaultUiPreferencesSnapshot()),
+  );
   await restoreFriendMemoryFiles(next.friends, parsed.friend_memories);
   runDueTaskFailures();
   await syncAllTaskNotifications();
@@ -2207,7 +2381,7 @@ async function importJsonSnapshot(text: string): Promise<void> {
   ensureDiaryBook();
   scheduleTaskDeadlinePump();
   scheduleSummaryCheckPump();
-  await persistState();
+  await persistAllRelationalState();
   scheduleAiPump();
 }
 
@@ -2288,6 +2462,7 @@ async function refreshModels(): Promise<void> {
     const nextModels = items.map((item) => normalizeModel(item));
     replaceReactiveArray(state.models, nextModels);
     reconcileFriendModelAssignments(nextModels);
+    await persistModelsAndFriendsState();
   } catch (error) {
     if (isAuthServerError(error)) {
       clearAuthState();
@@ -2304,6 +2479,7 @@ async function signup(username: string, password: string): Promise<void> {
 
   const payload = await serverService.signup(cleanUsername, password);
   applyAuthPayload(payload);
+  await persistMetaState();
   await refreshModels();
 }
 
@@ -2315,6 +2491,7 @@ async function signin(username: string, password: string): Promise<void> {
 
   const payload = await serverService.signin(cleanUsername, password);
   applyAuthPayload(payload);
+  await persistMetaState();
   await refreshModels();
 }
 
@@ -2326,13 +2503,58 @@ async function signout(): Promise<void> {
     }
   } finally {
     clearAuthState();
+    await persistMetaState();
+    await persistModelsAndFriendsState();
   }
+}
+
+async function updateConfig(patch: Partial<AppState['config']>): Promise<void> {
+  Object.assign(state.config, patch);
+  await persistConfigState();
+}
+
+async function updateFriend(index: number, draft: Partial<FriendRecord>): Promise<void> {
+  const target = state.friends[index];
+  if (!target) {
+    return;
+  }
+
+  if (typeof draft.enabled === 'boolean') {
+    target.enabled = draft.enabled;
+  }
+  if (typeof draft.name === 'string') {
+    target.name = draft.name.trim();
+  }
+  if (typeof draft.id === 'string' && draft.id.trim()) {
+    target.id = draft.id.trim();
+  }
+  if (typeof draft.model_id === 'string') {
+    target.model_id = remapDeprecatedModelId(draft.model_id.trim());
+  }
+  if (typeof draft.soul === 'string') {
+    target.soul = draft.soul.trim();
+  }
+  if (typeof draft.system_prompt === 'string') {
+    target.system_prompt = draft.system_prompt.trim();
+  }
+  if (typeof draft.active === 'number' && Number.isFinite(draft.active)) {
+    target.active = draft.active;
+  }
+  if (typeof draft.ai_active === 'number' && Number.isFinite(draft.ai_active)) {
+    target.ai_active = draft.ai_active;
+  }
+  if (typeof draft.latency === 'number' && Number.isFinite(draft.latency)) {
+    target.latency = draft.latency;
+  }
+
+  await persistModelsAndFriendsState();
 }
 
 function addFriend(): void {
   const friend = createDefaultFriendDraft(state.models[0]?.id ?? '', randomId('friend'));
   state.friends.push(friend);
   void writeFriendMemory(friend, '');
+  void persistModelsAndFriendsState();
 }
 
 function removeFriend(id: string): void {
@@ -2341,10 +2563,12 @@ function removeFriend(id: string): void {
   if (target) {
     void fileService.removeFile(target.memory_path);
   }
+  void persistModelsAndFriendsState();
 }
 
 function selectMyPanel(panel: MyPanel): void {
   state.last_opened_my_panel = panel;
+  void persistMetaState();
 }
 
 async function regenerateSummary(interval: SummaryInterval): Promise<void> {
@@ -2366,21 +2590,18 @@ export async function initializeAppStore(): Promise<void> {
   }
 
   await databaseService.initialize();
-  const loaded = await databaseService.loadAppState();
-  const legacyRaw =
-    !loaded && typeof localStorage !== 'undefined' ? localStorage.getItem(LEGACY_STORAGE_KEY) : null;
-  let legacyState: Partial<AppState> | null = null;
-
-  if (legacyRaw) {
-    try {
-      legacyState = JSON.parse(legacyRaw) as Partial<AppState>;
-    } catch {
-      legacyState = null;
-    }
+  let loaded = await databaseService.loadState();
+  if (!loaded) {
+    const seed = normalizeState(undefined);
+    await databaseService.replaceState(snapshotPersistedStateFrom(seed));
+    loaded = seed;
   }
-  const next = normalizeState(loaded ?? legacyState ?? undefined);
+
+  const next = normalizeState(loaded);
   await hydrateAssets(next.events);
+  persistenceSuspended = true;
   replaceState(next);
+  persistenceSuspended = false;
   await ensureFriendMemoryFiles(next.friends);
 
   if (state.token.trim()) {
@@ -2400,17 +2621,13 @@ export async function initializeAppStore(): Promise<void> {
   }
 
   bootstrapped = true;
-  if (legacyRaw && typeof localStorage !== 'undefined') {
-    localStorage.removeItem(LEGACY_STORAGE_KEY);
-    await databaseService.saveAppState(snapshotPersistedState());
-  }
   runDueTaskFailures();
   await syncAllTaskNotifications();
   ensureDailySummaries(false, false);
   ensureDiaryBook();
   scheduleTaskDeadlinePump();
   scheduleSummaryCheckPump();
-  await persistState();
+  await persistAllRelationalState();
   scheduleAiPump();
 }
 
@@ -2446,6 +2663,8 @@ export function useAppStore(): {
   signup: typeof signup;
   signin: typeof signin;
   signout: typeof signout;
+  updateConfig: typeof updateConfig;
+  updateFriend: typeof updateFriend;
   refreshModels: typeof refreshModels;
   hasActiveSession: typeof hasActiveSession;
   isModelAvailable: typeof isModelAvailable;
@@ -2490,6 +2709,8 @@ export function useAppStore(): {
     signup,
     signin,
     signout,
+    updateConfig,
+    updateFriend,
     refreshModels,
     hasActiveSession,
     isModelAvailable,

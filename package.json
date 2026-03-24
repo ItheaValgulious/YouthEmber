@@ -23,11 +23,12 @@
     "@capacitor/geolocation": "^8.1.0",
     "@capacitor/ios": "^8.2.0",
     "@capacitor/local-notifications": "^8.0.2",
-    "@capacitor/preferences": "^8.0.1",
     "@capacitor/share": "^8.0.1",
     "@ionic/vue": "^8.0.0",
     "@ionic/vue-router": "^8.0.0",
     "ionicons": "^7.0.0",
+    "jeep-sqlite": "^2.8.0",
+    "sql.js": "^1.11.0",
     "vue": "^3.5.0",
     "vue-router": "^4.4.0"
   },

@@ -4,13 +4,21 @@ import { databaseService } from '../services';
 
 export type UiLocale = 'zh-CN' | 'en';
 export type PaperThemeId = 'plain-paper' | 'warm-scrapbook' | 'ink-studio';
+export type CommentSortOrder = 'desc' | 'asc';
 export interface UiPreferencesSnapshot {
   locale: UiLocale;
   paperTheme: PaperThemeId;
+  commentSort: CommentSortOrder;
 }
 
 const UI_LOCALE_KEY = 'ui.locale';
 const UI_PAPER_THEME_KEY = 'ui.paper_theme';
+const UI_COMMENT_SORT_KEY = 'ui.comment.sort';
+const DEFAULT_UI_PREFERENCES: UiPreferencesSnapshot = {
+  locale: 'zh-CN',
+  paperTheme: 'plain-paper',
+  commentSort: 'desc',
+};
 
 const messages = {
   'zh-CN': {
@@ -305,8 +313,9 @@ const messages = {
 type MessageKey = keyof typeof messages['zh-CN'];
 
 const state = reactive({
-  locale: 'zh-CN' as UiLocale,
-  paperTheme: 'plain-paper' as PaperThemeId,
+  locale: DEFAULT_UI_PREFERENCES.locale,
+  paperTheme: DEFAULT_UI_PREFERENCES.paperTheme,
+  commentSort: DEFAULT_UI_PREFERENCES.commentSort,
 });
 
 function applyDocumentAppearance(): void {
@@ -336,6 +345,7 @@ export async function initializeUiPreferences(): Promise<void> {
   await databaseService.initialize();
   const savedLocale = await databaseService.getJson<UiLocale>(UI_LOCALE_KEY);
   const savedPaperTheme = await databaseService.getJson<PaperThemeId>(UI_PAPER_THEME_KEY);
+  const savedCommentSort = await databaseService.getJson<CommentSortOrder>(UI_COMMENT_SORT_KEY);
 
   if (savedLocale === 'zh-CN' || savedLocale === 'en') {
     state.locale = savedLocale;
@@ -345,13 +355,40 @@ export async function initializeUiPreferences(): Promise<void> {
     state.paperTheme = savedPaperTheme;
   }
 
+  if (savedCommentSort === 'desc' || savedCommentSort === 'asc') {
+    state.commentSort = savedCommentSort;
+  }
+
   applyDocumentAppearance();
+}
+
+export function createDefaultUiPreferencesSnapshot(): UiPreferencesSnapshot {
+  return {
+    ...DEFAULT_UI_PREFERENCES,
+  };
+}
+
+export function normalizeUiPreferencesSnapshot(
+  snapshot: Partial<UiPreferencesSnapshot> | null | undefined,
+  fallback: UiPreferencesSnapshot = createDefaultUiPreferencesSnapshot(),
+): UiPreferencesSnapshot {
+  return {
+    locale: snapshot?.locale === 'zh-CN' || snapshot?.locale === 'en' ? snapshot.locale : fallback.locale,
+    paperTheme:
+      snapshot?.paperTheme === 'plain-paper' ||
+      snapshot?.paperTheme === 'warm-scrapbook' ||
+      snapshot?.paperTheme === 'ink-studio'
+        ? snapshot.paperTheme
+        : fallback.paperTheme,
+    commentSort: snapshot?.commentSort === 'desc' || snapshot?.commentSort === 'asc' ? snapshot.commentSort : fallback.commentSort,
+  };
 }
 
 export function snapshotUiPreferences(): UiPreferencesSnapshot {
   return {
     locale: state.locale,
     paperTheme: state.paperTheme,
+    commentSort: state.commentSort,
   };
 }
 
@@ -360,18 +397,16 @@ export async function restoreUiPreferences(snapshot: Partial<UiPreferencesSnapsh
     return;
   }
 
-  const nextLocale = snapshot.locale === 'zh-CN' || snapshot.locale === 'en' ? snapshot.locale : state.locale;
-  const nextPaperTheme =
-    snapshot.paperTheme === 'plain-paper' || snapshot.paperTheme === 'warm-scrapbook' || snapshot.paperTheme === 'ink-studio'
-      ? snapshot.paperTheme
-      : state.paperTheme;
+  const nextPreferences = normalizeUiPreferencesSnapshot(snapshot, snapshotUiPreferences());
 
-  state.locale = nextLocale;
-  state.paperTheme = nextPaperTheme;
+  state.locale = nextPreferences.locale;
+  state.paperTheme = nextPreferences.paperTheme;
+  state.commentSort = nextPreferences.commentSort;
   applyDocumentAppearance();
 
-  await databaseService.setJson(UI_LOCALE_KEY, nextLocale);
-  await databaseService.setJson(UI_PAPER_THEME_KEY, nextPaperTheme);
+  await databaseService.setJson(UI_LOCALE_KEY, nextPreferences.locale);
+  await databaseService.setJson(UI_PAPER_THEME_KEY, nextPreferences.paperTheme);
+  await databaseService.setJson(UI_COMMENT_SORT_KEY, nextPreferences.commentSort);
 }
 
 export async function setLocale(locale: UiLocale): Promise<void> {
@@ -386,11 +421,17 @@ export async function setPaperTheme(theme: PaperThemeId): Promise<void> {
   await databaseService.setJson(UI_PAPER_THEME_KEY, theme);
 }
 
+export async function setCommentSort(order: CommentSortOrder): Promise<void> {
+  state.commentSort = order;
+  await databaseService.setJson(UI_COMMENT_SORT_KEY, order);
+}
+
 export function useUiPreferences(): {
   state: typeof state;
   t: typeof t;
   setLocale: typeof setLocale;
   setPaperTheme: typeof setPaperTheme;
+  setCommentSort: typeof setCommentSort;
   snapshot: typeof snapshotUiPreferences;
   restore: typeof restoreUiPreferences;
 } {
@@ -399,6 +440,7 @@ export function useUiPreferences(): {
     t,
     setLocale,
     setPaperTheme,
+    setCommentSort,
     snapshot: snapshotUiPreferences,
     restore: restoreUiPreferences,
   };

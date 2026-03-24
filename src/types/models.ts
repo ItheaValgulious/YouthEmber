@@ -7,6 +7,7 @@ export type RemoteTaskStatus = 'queued' | 'running' | 'succeeded' | 'failed' | '
 export type RunnableAiJobStatus = 'create_remote_task' | 'poll_remote_task' | 'apply_remote_result' | 'ack_remote_task';
 export type AiJobStatus = RunnableAiJobStatus | 'waiting_retry' | 'done' | 'failed';
 export type DiaryPaperSize = 'B5' | 'B6';
+export type TaskStatus = 'ongoing' | 'finished' | 'not_finished' | null;
 
 export interface LocationPayload {
   country: string | null;
@@ -58,6 +59,8 @@ export interface EventRecord {
   time: string | null;
   title: string;
   raw: string;
+  is_task: boolean;
+  task_status: TaskStatus;
   tags: Tag[];
   assets: AssetRecord[];
   comments: CommentRecord[];
@@ -276,7 +279,7 @@ export interface AppStateFriendMemoryExport {
 }
 
 export interface AppStateExportBundle {
-  schema_version: number;
+  schema_version: 1;
   exported_at: string;
   data: AppState;
   assets?: AppStateAssetExport[];

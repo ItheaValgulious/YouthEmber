@@ -123,7 +123,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import {
   IonBackButton,
@@ -137,28 +137,20 @@ import {
 } from '@ionic/vue';
 
 import { fromDateTimeLocalValue, toDateTimeLocalValue } from '../lib/date';
-import { databaseService } from '../services';
 import { useAppStore } from '../store/app-store';
 import { useUiPreferences } from '../ui/preferences';
-
-const COMMENT_SORT_KEY = 'ui.comment.sort';
 
 const route = useRoute();
 const store = useAppStore();
 const ui = useUiPreferences();
 const commentDraft = ref('');
-const commentOrder = ref<'desc' | 'asc'>('desc');
 const taskDueDraft = ref('');
 
-onMounted(async () => {
-  const saved = await databaseService.getJson<'desc' | 'asc'>(COMMENT_SORT_KEY);
-  if (saved === 'asc' || saved === 'desc') {
-    commentOrder.value = saved;
-  }
-});
-
-watch(commentOrder, (value) => {
-  void databaseService.setJson(COMMENT_SORT_KEY, value);
+const commentOrder = computed<'desc' | 'asc'>({
+  get: () => ui.state.commentSort,
+  set: (value) => {
+    void ui.setCommentSort(value);
+  },
 });
 
 const event = computed(() => store.getEventById(String(route.params.id)));

@@ -6,7 +6,7 @@ import { markAuthGateBootstrapped } from './auth/auth-gate';
 import router from './router';
 import { initializeAppStore } from './store/app-store';
 import { useAppStore } from './store/app-store';
-import { notificationService } from './services';
+import { databaseService, notificationService } from './services';
 import { initializeUiPreferences } from './ui/preferences';
 
 import '@ionic/vue/css/core.css';
@@ -26,6 +26,7 @@ app.use(IonicVue);
 app.use(router);
 
 async function bootstrap(): Promise<void> {
+  await databaseService.initialize();
   await Promise.all([router.isReady(), initializeAppStore(), initializeUiPreferences()]);
   markAuthGateBootstrapped();
 

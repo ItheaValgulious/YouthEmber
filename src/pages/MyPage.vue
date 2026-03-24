@@ -176,11 +176,18 @@
             <div class="paper-stack">
               <label>
                 <div class="section-title">{{ ui.t('pre_alert') }}</div>
-                <input v-model.number="store.state.config.pre_alert" class="native-input" min="0" step="1" type="number" />
+                <input
+                  :value="store.state.config.pre_alert"
+                  class="native-input"
+                  min="0"
+                  step="1"
+                  type="number"
+                  @input="handlePreAlertChange"
+                />
               </label>
               <label>
                 <div class="section-title">{{ ui.t('alert_time') }}</div>
-                <input v-model="store.state.config.alert_time" class="native-input" type="time" />
+                <input :value="store.state.config.alert_time" class="native-input" type="time" @input="handleAlertTimeChange" />
               </label>
             </div>
           </section>
@@ -237,14 +244,14 @@
               </label>
               <label>
                 <div class="section-title">{{ ui.t('diary_paper_size') }}</div>
-                <select v-model="store.state.config.diary_paper_size" class="native-select">
+                <select :value="store.state.config.diary_paper_size" class="native-select" @change="handleDiaryPaperSizeChange">
                   <option value="B5">{{ ui.t('b5_paper') }}</option>
                   <option value="B6">{{ ui.state.locale === 'zh-CN' ? 'B6 竖版' : 'B6 portrait' }}</option>
                 </select>
               </label>
               <label>
                 <div class="section-title">{{ ui.state.locale === 'zh-CN' ? '日记字号' : 'Diary font size' }}</div>
-                <select v-model.number="store.state.config.diary_font_scale" class="native-select">
+                <select :value="store.state.config.diary_font_scale" class="native-select" @change="handleDiaryFontScaleChange">
                   <option v-for="option in diaryFontOptions" :key="option.value" :value="option.value">
                     {{ option.label }}
                   </option>
@@ -506,6 +513,28 @@ function readNumber(event: Event): number {
   return Number.isFinite(value) ? value : 0;
 }
 
+function handlePreAlertChange(event: Event): void {
+  void store.updateConfig({ pre_alert: readNumber(event) });
+}
+
+function handleAlertTimeChange(event: Event): void {
+  void store.updateConfig({ alert_time: readText(event) });
+}
+
+function handleDiaryPaperSizeChange(event: Event): void {
+  const diaryPaperSize = readText(event);
+  if (diaryPaperSize === 'B5' || diaryPaperSize === 'B6') {
+    void store.updateConfig({ diary_paper_size: diaryPaperSize });
+  }
+}
+
+function handleDiaryFontScaleChange(event: Event): void {
+  const diaryFontScale = readNumber(event);
+  if (diaryFontScale > 0) {
+    void store.updateConfig({ diary_font_scale: diaryFontScale });
+  }
+}
+
 function updateFriendField(index: number, field: 'name' | 'id' | 'soul' | 'system_prompt', value: string): void {
   const draft = friendDrafts.value[index];
   if (!draft) {
@@ -546,20 +575,21 @@ function updateFriendModel(index: number, event: Event): void {
 
 function commitFriend(index: number): void {
   const draft = friendDrafts.value[index];
-  const target = store.state.friends[index];
-  if (!draft || !target) {
+  if (!draft) {
     return;
   }
 
-  target.enabled = draft.enabled;
-  target.name = draft.name.trim();
-  target.id = draft.id.trim();
-  target.model_id = draft.model_id.trim();
-  target.soul = draft.soul.trim();
-  target.system_prompt = draft.system_prompt.trim();
-  target.active = draft.active;
-  target.ai_active = draft.ai_active;
-  target.latency = draft.latency;
+  void store.updateFriend(index, {
+    enabled: draft.enabled,
+    name: draft.name,
+    id: draft.id,
+    model_id: draft.model_id,
+    soul: draft.soul,
+    system_prompt: draft.system_prompt,
+    active: draft.active,
+    ai_active: draft.ai_active,
+    latency: draft.latency,
+  });
 }
 
 function handleAddFriend(): void {
