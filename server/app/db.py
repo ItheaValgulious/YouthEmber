@@ -46,6 +46,7 @@ def init_db(settings: Settings) -> None:
                 password_hash TEXT NOT NULL,
                 auth_token_hash TEXT,
                 auth_token_expires_at TEXT,
+                quota INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 last_signin_at TEXT
@@ -82,6 +83,8 @@ def init_db(settings: Settings) -> None:
                 created_at TEXT NOT NULL,
                 started_at TEXT,
                 finished_at TEXT,
+                available_at TEXT,
+                queued_at TEXT,
                 updated_at TEXT NOT NULL,
                 acked_at TEXT,
                 FOREIGN KEY (user_id) REFERENCES users(id),
@@ -91,6 +94,9 @@ def init_db(settings: Settings) -> None:
 
             CREATE INDEX IF NOT EXISTS idx_current_requests_state_created_at
             ON current_requests (state, created_at);
+
+            CREATE INDEX IF NOT EXISTS idx_current_requests_state_available_queued_at
+            ON current_requests (state, available_at, queued_at, id);
 
             CREATE TABLE IF NOT EXISTS request_stats (
                 request_id TEXT PRIMARY KEY,
@@ -118,7 +124,17 @@ def init_db(settings: Settings) -> None:
             ON request_stats (user_id, client_request_id);
             """
         )
+        _ensure_column(connection, "users", "quota", "INTEGER NOT NULL DEFAULT 0")
         _ensure_column(connection, "models", "timeout_seconds", "REAL")
+        _ensure_column(connection, "current_requests", "available_at", "TEXT")
+        _ensure_column(connection, "current_requests", "queued_at", "TEXT")
+        connection.execute(
+            """
+            UPDATE users
+            SET quota = 0
+            WHERE quota IS NULL;
+            """
+        )
         connection.execute(
             """
             UPDATE models
@@ -126,6 +142,14 @@ def init_db(settings: Settings) -> None:
             WHERE timeout_seconds IS NULL OR timeout_seconds <= 0;
             """,
             (settings.upstream_timeout_seconds,),
+        )
+        connection.execute(
+            """
+            UPDATE current_requests
+            SET available_at = COALESCE(available_at, created_at),
+                queued_at = COALESCE(queued_at, created_at)
+            WHERE available_at IS NULL OR queued_at IS NULL;
+            """
         )
         connection.commit()
 

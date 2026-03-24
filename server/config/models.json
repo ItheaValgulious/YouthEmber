@@ -1,14 +1,5 @@
 [
   {
-    "id": "deepseek-r1",
-    "name": "DeepSeek R1",
-    "baseurl": "https://models.sjtu.edu.cn/api/v1",
-    "apikey_env": "ASHDAIRY_SJTU_API_KEY",
-    "model": "deepseek-r1",
-    "dealing_img": false,
-    "timeout_seconds": 300
-  },
-  {
     "id": "deepseek-v3",
     "name": "DeepSeek V3",
     "baseurl": "https://models.sjtu.edu.cn/api/v1",

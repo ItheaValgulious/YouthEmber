@@ -449,6 +449,7 @@ onBeforeUnmount(() => {
   display: grid;
   gap: calc(12px * var(--diary-font-scale));
   align-content: start;
+  min-width: 0;
 }
 
 .diary-comments.has-pair {
@@ -460,6 +461,8 @@ onBeforeUnmount(() => {
   gap: calc(8px * var(--diary-font-scale));
   align-content: start;
   height: 100%;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .diary-comments__item:nth-child(odd) {
@@ -475,7 +478,13 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   gap: 8px;
   align-items: baseline;
+  flex-wrap: wrap;
   font-size: calc(20px * var(--diary-font-scale));
+}
+
+.diary-comments__meta > * {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .diary-comments__item p {
@@ -484,6 +493,7 @@ onBeforeUnmount(() => {
   white-space: pre-wrap;
   font-size: calc(22px * var(--diary-font-scale));
   overflow-wrap: anywhere;
+  max-width: 100%;
 }
 
 .diary-summary {

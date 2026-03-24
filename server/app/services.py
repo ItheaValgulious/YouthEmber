@@ -62,6 +62,111 @@ def _ensure_username_available(connection: sqlite3.Connection, username: str) ->
         raise AppError(409, "username_taken", "Username already exists.")
 
 
+def _read_allowed_model_ids(settings: Settings) -> set[str] | None:
+    seed_path = settings.models_seed_path
+    if not seed_path.exists():
+        return None
+
+    payload = json.loads(seed_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, list):
+        return None
+
+    allowed_model_ids: set[str] = set()
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        model_id = str(item.get("id", "")).strip()
+        if model_id:
+            allowed_model_ids.add(model_id)
+
+    return allowed_model_ids
+
+
+def _build_model_id_filter(allowed_model_ids: set[str] | None) -> tuple[str, tuple[str, ...]]:
+    if allowed_model_ids is None:
+        return "", ()
+
+    if not allowed_model_ids:
+        return " AND 1 = 0", ()
+
+    placeholders = ", ".join("?" for _ in allowed_model_ids)
+    return f" AND id IN ({placeholders})", tuple(sorted(allowed_model_ids))
+
+
+def _ensure_user_can_create_tasks(connection: sqlite3.Connection, user_id: str) -> None:
+    row = connection.execute(
+        """
+        SELECT quota
+        FROM users
+        WHERE id = ?
+        LIMIT 1;
+        """,
+        (user_id,),
+    ).fetchone()
+    if row is None:
+        raise AppError(401, "auth_invalid", "User does not exist.")
+
+    quota = row["quota"]
+    if not isinstance(quota, int):
+        quota = int(quota or 0)
+
+    if quota <= 0:
+        raise AppError(403, "quota_exhausted", "User quota is exhausted.")
+
+
+def _normalize_positive_int(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+
+    if isinstance(value, (int, float)):
+        normalized = int(value)
+    else:
+        try:
+            normalized = int(str(value).strip())
+        except (TypeError, ValueError):
+            return None
+
+    return normalized if normalized > 0 else None
+
+
+def _calculate_quota_cost(
+    *,
+    prompt_tokens: Any,
+    completion_tokens: Any,
+    total_tokens: Any,
+    ai_response: Any,
+) -> int:
+    normalized_total_tokens = _normalize_positive_int(total_tokens)
+    if normalized_total_tokens is not None:
+        return normalized_total_tokens
+
+    normalized_prompt_tokens = _normalize_positive_int(prompt_tokens) or 0
+    normalized_completion_tokens = _normalize_positive_int(completion_tokens) or 0
+    combined_tokens = normalized_prompt_tokens + normalized_completion_tokens
+    if combined_tokens > 0:
+        return combined_tokens
+
+    if isinstance(ai_response, str):
+        return max(0, len(ai_response))
+
+    return 0
+
+
+def _deduct_user_quota(connection: sqlite3.Connection, user_id: str, amount: int) -> None:
+    if amount <= 0:
+        return
+
+    connection.execute(
+        """
+        UPDATE users
+        SET quota = COALESCE(quota, 0) - ?,
+            updated_at = ?
+        WHERE id = ?;
+        """,
+        (amount, utc_now_iso(), user_id),
+    )
+
+
 def _issue_login_for_user(
     connection: sqlite3.Connection,
     *,
@@ -279,13 +384,18 @@ def signout(settings: Settings, user_id: str) -> None:
 
 
 def list_models(settings: Settings) -> list[dict[str, Any]]:
+    allowed_model_ids = _read_allowed_model_ids(settings)
+    sql_filter, params = _build_model_id_filter(allowed_model_ids)
+
     with connection_scope(settings) as connection:
         rows = connection.execute(
-            """
+            f"""
             SELECT id, name
             FROM models
+            WHERE 1 = 1{sql_filter}
             ORDER BY name COLLATE NOCASE ASC, id ASC;
-            """
+            """,
+            params,
         ).fetchall()
     return rows_to_dicts(rows)
 
@@ -326,6 +436,11 @@ def create_task(
         if stats_row is not None:
             return build_task_view(row_to_dict(stats_row), include_response=False)
 
+        _ensure_user_can_create_tasks(connection, user_id)
+        allowed_model_ids = _read_allowed_model_ids(settings)
+        if allowed_model_ids is not None and model_id not in allowed_model_ids:
+            raise AppError(404, "model_not_found", "Model does not exist.")
+
         model_row = connection.execute(
             """
             SELECT id, name, baseurl
@@ -361,9 +476,11 @@ def create_task(
                 created_at,
                 started_at,
                 finished_at,
+                available_at,
+                queued_at,
                 updated_at,
                 acked_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, 0, NULL, NULL, ?, NULL, NULL, ?, NULL);
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, 0, NULL, NULL, ?, NULL, NULL, ?, ?, ?, NULL);
             """,
             (
                 task_id,
@@ -374,6 +491,8 @@ def create_task(
                 model_row["name"],
                 provider,
                 request_body_text,
+                now,
+                now,
                 now,
                 now,
             ),
@@ -484,12 +603,14 @@ def requeue_running_tasks(settings: Settings) -> int:
             SET state = 'queued',
                 started_at = NULL,
                 finished_at = NULL,
+                available_at = ?,
+                queued_at = ?,
                 updated_at = ?,
                 error_code = NULL,
                 error_message = NULL
             WHERE state = 'running';
             """,
-            (now,),
+            (now, now, now),
         )
         connection.commit()
         return int(cursor.rowcount or 0)
@@ -504,9 +625,11 @@ def claim_next_queued_task(settings: Settings) -> dict[str, Any] | None:
             SELECT id
             FROM current_requests
             WHERE state = 'queued'
-            ORDER BY created_at ASC, id ASC
+              AND COALESCE(available_at, created_at) <= ?
+            ORDER BY COALESCE(queued_at, created_at) ASC, id ASC
             LIMIT 1;
-            """
+            """,
+            (now,),
         ).fetchone()
         if row is None:
             connection.commit()
@@ -542,6 +665,10 @@ def claim_next_queued_task(settings: Settings) -> dict[str, Any] | None:
 
 
 def get_model_for_task(settings: Settings, model_id: str) -> dict[str, Any]:
+    allowed_model_ids = _read_allowed_model_ids(settings)
+    if allowed_model_ids is not None and model_id not in allowed_model_ids:
+        raise AppError(404, "model_not_found", "Model does not exist.")
+
     with connection_scope(settings) as connection:
         row = connection.execute(
             """
@@ -561,27 +688,36 @@ def get_model_for_task(settings: Settings, model_id: str) -> dict[str, Any]:
 
 
 def get_first_image_capable_model(settings: Settings) -> dict[str, Any] | None:
+    allowed_model_ids = _read_allowed_model_ids(settings)
+    sql_filter, params = _build_model_id_filter(allowed_model_ids)
+
     with connection_scope(settings) as connection:
         row = connection.execute(
-            """
+            f"""
             SELECT *
             FROM models
             WHERE dealing_img = 1
+            {sql_filter}
             ORDER BY id ASC
             LIMIT 1;
-            """
+            """,
+            params,
         ).fetchone()
     return row_to_dict(row)
 
 
 def get_max_model_timeout_seconds(settings: Settings) -> float:
+    allowed_model_ids = _read_allowed_model_ids(settings)
+    sql_filter, params = _build_model_id_filter(allowed_model_ids)
+
     with connection_scope(settings) as connection:
         row = connection.execute(
-            """
+            f"""
             SELECT MAX(COALESCE(timeout_seconds, ?)) AS max_timeout_seconds
-            FROM models;
+            FROM models
+            WHERE 1 = 1{sql_filter};
             """,
-            (settings.upstream_timeout_seconds,),
+            (settings.upstream_timeout_seconds, *params),
         ).fetchone()
 
     if row is None:
@@ -601,21 +737,26 @@ def mark_task_retrying(
     retry_count: int,
     error_code: str,
     error_message: str,
+    available_at: str,
+    queued_at: str,
 ) -> dict[str, Any]:
     now = utc_now_iso()
     with connection_scope(settings) as connection:
         connection.execute(
             """
             UPDATE current_requests
-            SET state = 'running',
+            SET state = 'queued',
                 retry_count = ?,
                 error_code = ?,
                 error_message = ?,
+                started_at = NULL,
                 finished_at = NULL,
+                available_at = ?,
+                queued_at = ?,
                 updated_at = ?
             WHERE id = ?;
             """,
-            (retry_count, error_code, error_message, now, task_id),
+            (retry_count, error_code, error_message, available_at, queued_at, now, task_id),
         )
         current_row = _fetch_current_task_by_id(connection, task_id)
         if current_row is None:
@@ -662,6 +803,13 @@ def mark_task_succeeded(
         current_row = _fetch_current_task_by_id(connection, task_id)
         if current_row is None:
             raise AppError(404, "task_not_found", "Task does not exist.")
+        quota_cost = _calculate_quota_cost(
+            prompt_tokens=current_row.get("prompt_tokens"),
+            completion_tokens=current_row.get("completion_tokens"),
+            total_tokens=current_row.get("total_tokens"),
+            ai_response=current_row.get("ai_response"),
+        )
+        _deduct_user_quota(connection, str(current_row["user_id"]), quota_cost)
         _copy_current_task_to_stats(connection, current_row, updated_at=now)
         connection.commit()
         return current_row

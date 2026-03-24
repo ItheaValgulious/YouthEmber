@@ -3,7 +3,7 @@ import type { AppConfig, FriendRecord, ModelRecord, Tag } from '../types/models'
 type FriendPreset = Omit<FriendRecord, 'model_id'>;
 
 const DEFAULT_FRIEND_MODEL_IDS: Record<string, string> = {
-  friend_ice: 'deepseek-r1',
+  friend_ice: 'deepseek-v3',
   friend_fire: 'deepseek-v3',
   friend_Ithea: 'deepseek-v3',
 };

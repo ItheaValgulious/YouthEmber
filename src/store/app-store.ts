@@ -44,7 +44,7 @@ const RETRY_DELAYS = [60_000, 5 * 60_000, 10 * 60_000];
 const REMOTE_POLL_INTERVAL_MS = 2_000;
 const DEMO_DELAY_UNIT_MS = 120;
 const FRIEND_MEMORY_MAX_CHARS = 100_000;
-const PRIMARY_MODEL_PREFERENCES = ['deepseek-v3', 'deepseek-r1', 'qwen3vl'];
+const PRIMARY_MODEL_PREFERENCES = ['deepseek-v3', 'qwen3vl'];
 const SUMMARY_WINDOWS: Record<SummaryInterval, number> = {
   '7d': 7,
   '3m': 90,
@@ -105,8 +105,13 @@ function cloneModel(model: ModelRecord): ModelRecord {
   };
 }
 
+function remapDeprecatedModelId(modelId: string): string {
+  return modelId === 'deepseek-r1' ? 'deepseek-v3' : modelId;
+}
+
 function hasModelId(models: ModelRecord[], modelId: string): boolean {
-  return Boolean(modelId.trim() && models.some((model) => model.id === modelId));
+  const normalizedModelId = remapDeprecatedModelId(modelId.trim());
+  return Boolean(normalizedModelId && models.some((model) => model.id === normalizedModelId));
 }
 
 function cloneDiaryBook(book: DiaryBookRecord | null | undefined): DiaryBookRecord | null {
@@ -159,13 +164,17 @@ function normalizeModel(raw: Partial<ModelRecord>): ModelRecord {
 function normalizeFriend(raw: Partial<FriendRecord>, fallbackModelId: string): FriendRecord {
   const id = typeof raw.id === 'string' && raw.id.trim() ? raw.id.trim() : randomId('friend');
   const seed = createDefaultFriendDraft(fallbackModelId, id);
+  const normalizedModelId =
+    typeof raw.model_id === 'string' && raw.model_id.trim()
+      ? remapDeprecatedModelId(raw.model_id.trim())
+      : fallbackModelId;
 
   return {
     ...seed,
     ...raw,
     id,
     name: typeof raw.name === 'string' ? raw.name : seed.name,
-    model_id: typeof raw.model_id === 'string' && raw.model_id.trim() ? raw.model_id.trim() : fallbackModelId,
+    model_id: normalizedModelId,
     memory_path:
       typeof raw.memory_path === 'string' && raw.memory_path.trim() ? raw.memory_path.trim() : buildFriendMemoryPath(id),
     soul: typeof raw.soul === 'string' ? raw.soul : seed.soul,
@@ -389,7 +398,9 @@ function normalizeState(raw: Partial<AppState> | undefined): AppState {
 
   const tags = dedupeTags([...(raw.tags ?? []), ...seed.tags].map(cloneTag));
   const models =
-    Array.isArray(raw.models) && raw.models.length ? raw.models.map((item) => normalizeModel(item)) : seed.models.map(cloneModel);
+    Array.isArray(raw.models) && raw.models.length
+      ? raw.models.map((item) => normalizeModel(item)).filter((item) => item.id !== 'deepseek-r1')
+      : seed.models.map(cloneModel);
   const fallbackModelId = models[0]?.id ?? seed.models[0]?.id ?? '';
   const friends =
     Array.isArray(raw.friends) && raw.friends.length
@@ -422,6 +433,26 @@ function snapshotState(): AppState {
   return JSON.parse(JSON.stringify(state)) as AppState;
 }
 
+function buildPersistedAsset(asset: AssetRecord): AssetRecord {
+  return {
+    ...asset,
+    uri: undefined,
+    display_path: undefined,
+  };
+}
+
+function snapshotPersistedState(): AppState {
+  const snapshot = snapshotState();
+  return {
+    ...snapshot,
+    events: snapshot.events.map((event) => ({
+      ...event,
+      assets: event.assets.map(buildPersistedAsset),
+    })),
+    diary_book: null,
+  };
+}
+
 async function hydrateAssets(events: EventRecord[]): Promise<void> {
   for (const event of events) {
     const hydratedAssets: AssetRecord[] = [];
@@ -439,7 +470,7 @@ async function persistState(): Promise<void> {
     return;
   }
 
-  const payload = snapshotState();
+  const payload = snapshotPersistedState();
   persistChain = persistChain
     .catch(() => undefined)
     .then(() => databaseService.saveAppState(payload));
@@ -582,11 +613,12 @@ function buildDiaryFingerprint(): string {
       assets: event.assets.map((asset) => ({
         id: asset.id,
         filepath: asset.filepath,
-        display_path: asset.display_path,
         filename: asset.filename,
         type: asset.type,
         upload_order: asset.upload_order,
         mime_type: asset.mime_type,
+        width: asset.width,
+        height: asset.height,
       })),
       comments: event.comments.map((comment) => ({
         id: comment.id,
@@ -875,7 +907,8 @@ function getPrimaryModel(): ModelRecord {
 }
 
 function getModelById(id: string): ModelRecord | undefined {
-  return state.models.find((model) => model.id === id);
+  const normalizedId = remapDeprecatedModelId(id.trim());
+  return state.models.find((model) => model.id === normalizedId);
 }
 
 function isModelAvailable(modelId: string): boolean {
@@ -927,21 +960,21 @@ function normalizeRunnableJobStatus(job: PendingAiJob): RunnableAiJobStatus {
 }
 
 function updateJobFromRemoteTask(job: PendingAiJob, remoteStatus: {
-  id: string;
-  state: RemoteTaskStatus;
-  retry_count?: number;
-  ai_response?: string | null;
-  error_code?: string | null;
-  error_message?: string | null;
-  created_at?: string | null;
-  started_at?: string | null;
-  finished_at?: string | null;
-}): void {
-  job.remote_task_id = remoteStatus.id;
-  job.remote_status = remoteStatus.state;
-  job.remote_response = typeof remoteStatus.ai_response === 'string' ? remoteStatus.ai_response : job.remote_response;
-  job.remote_error_code = remoteStatus.error_code ?? undefined;
-  job.remote_created_at = remoteStatus.created_at ?? job.remote_created_at;
+    id: string;
+    state: RemoteTaskStatus;
+    retry_count?: number;
+    ai_response?: string | null;
+    error_code?: string | null;
+    error_message?: string | null;
+    created_at?: string | null;
+    started_at?: string | null;
+    finished_at?: string | null;
+  }): void {
+    job.remote_task_id = remoteStatus.id;
+    job.remote_status = remoteStatus.state;
+    job.remote_response = typeof remoteStatus.ai_response === 'string' ? remoteStatus.ai_response : job.remote_response;
+    job.remote_error_code = remoteStatus.error_code ?? undefined;
+    job.remote_created_at = remoteStatus.created_at ?? job.remote_created_at;
   job.remote_started_at = remoteStatus.started_at ?? job.remote_started_at;
   job.remote_finished_at = remoteStatus.finished_at ?? job.remote_finished_at;
   if (remoteStatus.error_message) {
@@ -2124,7 +2157,7 @@ async function exportJsonSnapshot(): Promise<void> {
   const payload: AppStateExportBundle = {
     schema_version: 3,
     exported_at: new Date().toISOString(),
-    data: snapshotState(),
+    data: snapshotPersistedState(),
     assets: await buildAssetExportList(),
     friend_memories: await buildFriendMemoryExportList(),
     ui_preferences: snapshotUiPreferences(),
@@ -2369,7 +2402,7 @@ export async function initializeAppStore(): Promise<void> {
   bootstrapped = true;
   if (legacyRaw && typeof localStorage !== 'undefined') {
     localStorage.removeItem(LEGACY_STORAGE_KEY);
-    await databaseService.saveAppState(snapshotState());
+    await databaseService.saveAppState(snapshotPersistedState());
   }
   runDueTaskFailures();
   await syncAllTaskNotifications();

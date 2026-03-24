@@ -84,6 +84,10 @@ function fileToDataUrl(file: File): Promise<string> {
   return blobToDataUrl(file);
 }
 
+function isPreviewUrl(value: string | undefined): boolean {
+  return Boolean(value && (value.startsWith('data:') || value.startsWith('http') || value.startsWith('blob:')));
+}
+
 function textToDataUrl(content: string, mimeType: string): string {
   const encoder = new TextEncoder();
   const bytes = encoder.encode(content);
@@ -180,6 +184,23 @@ async function readVideoMetadata(dataUrl: string): Promise<Pick<AssetRecord, 'wi
 }
 
 export class FileService {
+  private async readPathAsDataUrl(path: string, mimeType?: string): Promise<string> {
+    if (!path.trim() || isPreviewUrl(path)) {
+      return path;
+    }
+
+    const result = await Filesystem.readFile({
+      path,
+      directory: Directory.Data,
+    });
+
+    if (result.data instanceof Blob) {
+      return blobToDataUrl(result.data);
+    }
+
+    return `data:${mimeType ?? 'application/octet-stream'};base64,${result.data}`;
+  }
+
   async saveFiles(files: Iterable<File>, hint?: AssetType, uploadOrderStart = 0): Promise<AssetRecord[]> {
     const list = [...files];
     const stored: AssetRecord[] = [];
@@ -257,36 +278,55 @@ export class FileService {
 
   async hydrateAsset(asset: AssetRecord): Promise<AssetRecord> {
     let thumbnailPath = asset.thumbnail_path;
-    if (
-      thumbnailPath &&
-      !thumbnailPath.startsWith('data:') &&
-      !thumbnailPath.startsWith('http') &&
-      !thumbnailPath.startsWith('blob:')
-    ) {
-      try {
-        const { uri } = await Filesystem.getUri({
-          path: thumbnailPath,
-          directory: Directory.Data,
-        });
-        thumbnailPath = isNativePlatform() ? toWebViewPath(uri) : thumbnailPath;
-      } catch {
-        thumbnailPath = asset.thumbnail_path;
+    if (thumbnailPath && !isPreviewUrl(thumbnailPath)) {
+      if (isNativePlatform()) {
+        try {
+          const { uri } = await Filesystem.getUri({
+            path: thumbnailPath,
+            directory: Directory.Data,
+          });
+          thumbnailPath = toWebViewPath(uri);
+        } catch {
+          thumbnailPath = asset.thumbnail_path;
+        }
+      } else {
+        try {
+          thumbnailPath = await this.readPathAsDataUrl(thumbnailPath, 'image/jpeg');
+        } catch {
+          thumbnailPath = asset.thumbnail_path;
+        }
       }
     }
 
-    if (asset.display_path?.startsWith('data:') || asset.display_path?.startsWith('http')) {
+    if (isPreviewUrl(asset.display_path)) {
       return { ...asset, thumbnail_path: thumbnailPath };
+    }
+
+    if (!isNativePlatform()) {
+      try {
+        return {
+          ...asset,
+          display_path: await this.readPathAsDataUrl(asset.filepath, asset.mime_type),
+          thumbnail_path: thumbnailPath,
+        };
+      } catch {
+        return {
+          ...asset,
+          display_path: asset.display_path ?? asset.filepath,
+          thumbnail_path: thumbnailPath,
+        };
+      }
     }
 
     if (asset.uri) {
       return {
         ...asset,
-        display_path: isNativePlatform() ? toWebViewPath(asset.uri) : asset.display_path ?? asset.filepath,
+        display_path: toWebViewPath(asset.uri),
         thumbnail_path: thumbnailPath,
       };
     }
 
-    if (asset.filepath.startsWith('data:') || asset.filepath.startsWith('blob:') || asset.filepath.startsWith('http')) {
+    if (isPreviewUrl(asset.filepath)) {
       return {
         ...asset,
         display_path: asset.display_path ?? asset.filepath,
@@ -303,7 +343,7 @@ export class FileService {
       return {
         ...asset,
         uri,
-        display_path: isNativePlatform() ? toWebViewPath(uri) : asset.display_path ?? asset.filepath,
+        display_path: toWebViewPath(uri),
         thumbnail_path: thumbnailPath,
       };
     } catch {

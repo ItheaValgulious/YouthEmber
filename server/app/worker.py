@@ -4,11 +4,13 @@ import copy
 import json
 import logging
 import threading
+from datetime import timedelta
 from typing import Any
 
 from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAI, OpenAIError
 
 from .config import Settings
+from .security import utc_now, utc_now_iso
 from .services import (
     AppError,
     claim_next_queued_task,
@@ -105,88 +107,89 @@ class TaskWorker:
         retry_count = int(task.get("retry_count") or 0)
         retry_delays = self.settings.worker_retry_delays_seconds
 
-        while not self._stop_event.is_set():
-            try:
-                model_row = get_model_for_task(self.settings, str(task["model_id"]))
-                request_body = json.loads(str(task["request_body"]))
-                final_request_body = self._prepare_request_body_for_model(request_body, model_row)
-                response_text, usage = self._call_upstream(model_row, final_request_body)
-                mark_task_succeeded(
-                    self.settings,
-                    task_id=task_id,
-                    ai_response=response_text,
-                    prompt_tokens=usage["prompt_tokens"],
-                    completion_tokens=usage["completion_tokens"],
-                    total_tokens=usage["total_tokens"],
-                )
-                return
-            except AppError as exc:
-                logger.warning("Task %s failed with app error %s.", task_id, exc.error_code)
-                mark_task_failed(
-                    self.settings,
-                    task_id=task_id,
-                    retry_count=retry_count,
-                    error_code=exc.error_code,
-                    error_message=exc.message,
-                )
-                return
-            except UpstreamFailure as exc:
-                logger.warning(
-                    "Task %s upstream failure %s (retryable=%s, retry_count=%s).",
-                    task_id,
-                    exc.error_code,
-                    exc.retryable,
-                    retry_count,
-                )
-                if exc.retryable and retry_count < len(retry_delays):
-                    retry_count += 1
-                    mark_task_retrying(
-                        self.settings,
-                        task_id=task_id,
-                        retry_count=retry_count,
-                        error_code=exc.error_code,
-                        error_message=exc.message,
-                    )
-                    if self._stop_event.wait(retry_delays[retry_count - 1]):
-                        return
-                    continue
-
-                mark_task_failed(
+        try:
+            model_row = get_model_for_task(self.settings, str(task["model_id"]))
+            request_body = json.loads(str(task["request_body"]))
+            final_request_body = self._prepare_request_body_for_model(request_body, model_row)
+            response_text, usage = self._call_upstream(model_row, final_request_body)
+            mark_task_succeeded(
+                self.settings,
+                task_id=task_id,
+                ai_response=response_text,
+                prompt_tokens=usage["prompt_tokens"],
+                completion_tokens=usage["completion_tokens"],
+                total_tokens=usage["total_tokens"],
+            )
+            return
+        except AppError as exc:
+            logger.warning("Task %s failed with app error %s.", task_id, exc.error_code)
+            mark_task_failed(
+                self.settings,
+                task_id=task_id,
+                retry_count=retry_count,
+                error_code=exc.error_code,
+                error_message=exc.message,
+            )
+            return
+        except UpstreamFailure as exc:
+            logger.warning(
+                "Task %s upstream failure %s (retryable=%s, retry_count=%s).",
+                task_id,
+                exc.error_code,
+                exc.retryable,
+                retry_count,
+            )
+            if exc.retryable and retry_count < len(retry_delays):
+                retry_count += 1
+                retry_delay_seconds = retry_delays[retry_count - 1]
+                mark_task_retrying(
                     self.settings,
                     task_id=task_id,
                     retry_count=retry_count,
                     error_code=exc.error_code,
                     error_message=exc.message,
+                    available_at=(utc_now() + timedelta(seconds=retry_delay_seconds)).isoformat().replace("+00:00", "Z"),
+                    queued_at=utc_now_iso(),
                 )
                 return
-            except Exception as exc:
-                logger.exception("Task %s failed with an unexpected worker error.", task_id)
-                failure = UpstreamFailure(
-                    error_code="worker_internal_error",
-                    message=str(exc) or "Worker internal error.",
-                    retryable=retry_count < len(retry_delays),
-                )
-                if failure.retryable:
-                    retry_count += 1
-                    mark_task_retrying(
-                        self.settings,
-                        task_id=task_id,
-                        retry_count=retry_count,
-                        error_code=failure.error_code,
-                        error_message=failure.message,
-                    )
-                    if self._stop_event.wait(retry_delays[retry_count - 1]):
-                        return
-                    continue
 
-                mark_task_failed(
+            mark_task_failed(
+                self.settings,
+                task_id=task_id,
+                retry_count=retry_count,
+                error_code=exc.error_code,
+                error_message=exc.message,
+            )
+            return
+        except Exception as exc:
+            logger.exception("Task %s failed with an unexpected worker error.", task_id)
+            failure = UpstreamFailure(
+                error_code="worker_internal_error",
+                message=str(exc) or "Worker internal error.",
+                retryable=retry_count < len(retry_delays),
+            )
+            if failure.retryable:
+                retry_count += 1
+                retry_delay_seconds = retry_delays[retry_count - 1]
+                mark_task_retrying(
                     self.settings,
                     task_id=task_id,
                     retry_count=retry_count,
                     error_code=failure.error_code,
                     error_message=failure.message,
+                    available_at=(utc_now() + timedelta(seconds=retry_delay_seconds)).isoformat().replace("+00:00", "Z"),
+                    queued_at=utc_now_iso(),
                 )
                 return
+
+            mark_task_failed(
+                self.settings,
+                task_id=task_id,
+                retry_count=retry_count,
+                error_code=failure.error_code,
+                error_message=failure.message,
+            )
+            return
 
     def _prepare_request_body_for_model(
         self,

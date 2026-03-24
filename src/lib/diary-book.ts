@@ -15,7 +15,7 @@ import type {
   SummaryRecord,
 } from '../types/models';
 
-const DIARY_BOOK_VERSION = 3;
+const DIARY_BOOK_VERSION = 4;
 const BASE_PAGE_WIDTH = 1760;
 const BASE_PAGE_HEIGHT = 2500;
 const BASE_MARGIN_X = 140;
@@ -381,12 +381,22 @@ function shouldSplitCommentCards(layout: DiaryRowCommentBlock['layout'], width: 
   return layout === 'row' && count === 2 && width >= 920;
 }
 
+function estimateCommentMetaHeight(comment: DiaryRowCommentBlock['comments'][number], width: number): number {
+  const metaFontSize = 20 * DIARY_FONT_SCALE;
+  const lineHeight = metaFontSize * 1.35;
+  const charsPerLine = Math.max(8, Math.floor((width - 28 * DIARY_FONT_SCALE) / Math.max(metaFontSize * 0.9, 1)));
+  const metaLength = `${comment.sender} ${comment.time_label}`.trim().length;
+  const lines = Math.max(1, Math.ceil(Math.max(metaLength, 1) / charsPerLine));
+
+  return Math.ceil(lines * lineHeight);
+}
+
 function estimateCommentCardHeight(comment: DiaryRowCommentBlock['comments'][number], width: number): number {
   const bodyFontSize = 22 * DIARY_FONT_SCALE;
   const lineHeight = bodyFontSize * 1.62;
   const charsPerLine = Math.max(8, Math.floor((width - 28 * DIARY_FONT_SCALE) / Math.max(bodyFontSize * 0.96, 1)));
   const lines = Math.max(1, Math.ceil(Math.max(comment.content.length, 1) / charsPerLine));
-  const metaHeight = 42 * DIARY_FONT_SCALE;
+  const metaHeight = estimateCommentMetaHeight(comment, width);
   const chromeHeight = 52 * DIARY_FONT_SCALE;
 
   return Math.ceil(chromeHeight + metaHeight + lines * lineHeight);
@@ -424,6 +434,26 @@ function estimateSummaryHeight(body: string, width: number): number {
     Math.ceil(headingHeight + paddingAllowance + lines * lineHeight),
     Math.round(320 * DIARY_FONT_SCALE),
     Math.round(1120 * DIARY_FONT_SCALE),
+  );
+}
+
+function estimateImageHeight(asset: AssetRecord): number {
+  const width = typeof asset.width === 'number' && asset.width > 0 ? asset.width : null;
+  const height = typeof asset.height === 'number' && asset.height > 0 ? asset.height : null;
+  if (!width || !height) {
+    return IMAGE_HEIGHT;
+  }
+
+  const aspectRatio = height / width;
+  if (aspectRatio <= 1.08) {
+    return IMAGE_HEIGHT;
+  }
+
+  const portraitBoost = clamp(aspectRatio, 1.08, 2.2);
+  return clamp(
+    Math.round(IMAGE_HEIGHT * (1 + (portraitBoost - 1.08) * 0.7)),
+    IMAGE_HEIGHT,
+    Math.round(IMAGE_HEIGHT * 2.1),
   );
 }
 
@@ -611,11 +641,12 @@ function buildEventRows(item: Extract<DiarySourceItem, { kind: 'event' }>, conte
   const remainingCommentGroups = commentGroups.slice(usedCommentGroups);
   for (let index = 0; index < remainingCommentGroups.length; index += 1) {
     const rowGroups = [remainingCommentGroups[index]];
-    const firstWidth = FULL_WIDTH - 40;
+    const rowInset = Math.max(24, Math.round(B5_COLUMN_GAP * 0.7));
+    const firstWidth = FULL_WIDTH - rowInset * 2;
 
     const blocks: DiaryRowBlock[] = rowGroups.map((comments, groupIndex) => {
       const width = firstWidth;
-      const x = B5_MARGIN_X + 20;
+      const x = B5_MARGIN_X + rowInset;
 
       return {
         type: 'comment_group',
@@ -641,10 +672,11 @@ function buildEventRows(item: Extract<DiarySourceItem, { kind: 'event' }>, conte
 
   images.forEach((asset, index) => {
     const leftAligned = (variantSeed + index) % 2 === 0;
+    const imageHeight = estimateImageHeight(asset);
     rows.push({
       key: `${event.id}-image-${asset.id}`,
       date: key.date,
-      height: IMAGE_HEIGHT,
+      height: imageHeight,
       anchor: key,
       blocks: [
         {
@@ -654,7 +686,7 @@ function buildEventRows(item: Extract<DiarySourceItem, { kind: 'event' }>, conte
           asset,
           x: leftAligned ? B5_MARGIN_X + 20 : B5_PAGE_WIDTH - B5_MARGIN_X - IMAGE_WIDTH - 20,
           width: IMAGE_WIDTH,
-          height: IMAGE_HEIGHT,
+          height: imageHeight,
           rotation: leftAligned ? -2.2 : 2.0,
         },
       ],
