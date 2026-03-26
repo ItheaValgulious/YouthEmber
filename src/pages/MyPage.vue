@@ -97,7 +97,7 @@
           </section>
 
           <section class="paper-sheet my-panel">
-            <div class="my-panel__head row between wrap">
+            <div class="my-panel__head">
               <div>
                 <div class="ink-label handwritten">{{ label('账号认证', 'Account') }}</div>
                 <h2 class="ink-title">{{ label('服务端登录', 'Server Sign In') }}</h2>
@@ -111,7 +111,7 @@
                 :disabled="authBusy"
                 @click="handleSignout"
               >
-                {{ label('退出登录', 'Sign out') }}
+                {{ label('注销', 'Sign out') }}
               </ion-button>
             </div>
 
@@ -128,9 +128,27 @@
                     <strong>{{ label('到期时间', 'Expires at') }}:</strong>
                     {{ store.state.auth_expires_at ? store.formatDateTime(store.state.auth_expires_at) : '-' }}
                   </div>
+                  <label>
+                    <div class="section-title">{{ label('原密码', 'Current password') }}</div>
+                    <input
+                      v-model="currentPassword"
+                      class="native-input"
+                      autocomplete="current-password"
+                      type="password"
+                    />
+                  </label>
+                  <label>
+                    <div class="section-title">{{ label('新密码', 'New password') }}</div>
+                    <input
+                      v-model="newPassword"
+                      class="native-input"
+                      autocomplete="new-password"
+                      type="password"
+                    />
+                  </label>
                   <div class="row wrap">
-                    <ion-button fill="outline" size="small" :disabled="authBusy || !serverConfigured" @click="handleRefreshModels">
-                      {{ label('刷新模型列表', 'Refresh models') }}
+                    <ion-button :disabled="authBusy || !serverConfigured" @click="handleChangePassword">
+                      {{ label('修改密码', 'Change password') }}
                     </ion-button>
                   </div>
                 </div>
@@ -441,6 +459,8 @@ const busy = ref(false);
 const authBusy = ref(false);
 const authUsername = ref('');
 const authPassword = ref('');
+const currentPassword = ref('');
+const newPassword = ref('');
 const friendDrafts = ref<FriendDraft[]>([]);
 
 function label(zh: string, en: string): string {
@@ -652,10 +672,26 @@ async function handleSignout(): Promise<void> {
   authBusy.value = true;
   try {
     await store.signout();
+    currentPassword.value = '';
+    newPassword.value = '';
     resetAuthGateSkip();
     await router.replace('/auth');
   } catch (error) {
     window.alert(error instanceof Error ? error.message : label('退出失败', 'Sign out failed'));
+  } finally {
+    authBusy.value = false;
+  }
+}
+
+async function handleChangePassword(): Promise<void> {
+  authBusy.value = true;
+  try {
+    await store.changePassword(currentPassword.value, newPassword.value);
+    currentPassword.value = '';
+    newPassword.value = '';
+    window.alert(label('密码已更新。', 'Password updated.'));
+  } catch (error) {
+    window.alert(error instanceof Error ? error.message : label('修改密码失败', 'Failed to change password'));
   } finally {
     authBusy.value = false;
   }

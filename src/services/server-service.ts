@@ -150,6 +150,18 @@ class ServerService {
     });
   }
 
+  async changePassword(token: string, oldPassword: string, newPassword: string): Promise<AuthPayload> {
+    return this.request<AuthPayload>({
+      method: 'POST',
+      path: '/api/v1/auth/change-password',
+      token,
+      body: {
+        old_password: oldPassword,
+        new_password: newPassword,
+      },
+    });
+  }
+
   async signout(token: string): Promise<void> {
     await this.request<{ ok: boolean }>({
       method: 'POST',

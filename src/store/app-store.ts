@@ -2502,6 +2502,31 @@ async function signin(username: string, password: string): Promise<void> {
   await refreshModels();
 }
 
+async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
+  if (!serverService.isConfigured()) {
+    throw new Error('Server API is not configured.');
+  }
+
+  if (!hasActiveSession()) {
+    throw new Error('Please sign in first.');
+  }
+
+  if (!currentPassword || !newPassword) {
+    throw new Error('Current password and new password are required.');
+  }
+
+  try {
+    const payload = await serverService.changePassword(state.token, currentPassword, newPassword);
+    applyAuthPayload(payload);
+    await persistMetaState();
+  } catch (error) {
+    if (isAuthServerError(error)) {
+      clearAuthState();
+    }
+    throw error;
+  }
+}
+
 async function signout(): Promise<void> {
   const token = state.token.trim();
   try {
@@ -2669,6 +2694,7 @@ export function useAppStore(): {
   selectMyPanel: typeof selectMyPanel;
   signup: typeof signup;
   signin: typeof signin;
+  changePassword: typeof changePassword;
   signout: typeof signout;
   updateConfig: typeof updateConfig;
   updateFriend: typeof updateFriend;
@@ -2715,6 +2741,7 @@ export function useAppStore(): {
     selectMyPanel,
     signup,
     signin,
+    changePassword,
     signout,
     updateConfig,
     updateFriend,

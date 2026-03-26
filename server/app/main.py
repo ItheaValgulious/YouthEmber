@@ -10,11 +10,20 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from .config import Settings, load_settings
 from .db import init_db, seed_models_if_needed
-from .schemas import AuthRequest, AuthResponse, ModelsResponse, OkResponse, TaskCreateRequest, TaskEnvelope
+from .schemas import (
+    AuthRequest,
+    AuthResponse,
+    ChangePasswordRequest,
+    ModelsResponse,
+    OkResponse,
+    TaskCreateRequest,
+    TaskEnvelope,
+)
 from .services import (
     AppError,
     CurrentUser,
     ack_task,
+    change_password,
     create_task,
     get_current_user,
     get_task,
@@ -84,6 +93,19 @@ def create_app() -> FastAPI:
     @app.post("/api/v1/auth/signin", response_model=AuthResponse)
     async def signin_route(payload: AuthRequest, app_settings: Settings = Depends(get_settings)) -> dict:
         return signin(app_settings, payload.username, payload.password)
+
+    @app.post("/api/v1/auth/change-password", response_model=AuthResponse)
+    async def change_password_route(
+        payload: ChangePasswordRequest,
+        user: CurrentUser = Depends(get_authenticated_user),
+        app_settings: Settings = Depends(get_settings),
+    ) -> dict:
+        return change_password(
+            app_settings,
+            user_id=user.id,
+            old_password=payload.old_password,
+            new_password=payload.new_password,
+        )
 
     @app.post("/api/v1/auth/signout", response_model=OkResponse)
     async def signout_route(

@@ -15,6 +15,11 @@ class AuthRequest(BaseModel):
     password: str = Field(min_length=8, max_length=256)
 
 
+class ChangePasswordRequest(BaseModel):
+    old_password: str = Field(min_length=1, max_length=256)
+    new_password: str = Field(min_length=8, max_length=256)
+
+
 class AuthResponse(BaseModel):
     user: ApiUser
     token: str

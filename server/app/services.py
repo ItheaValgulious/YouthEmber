@@ -357,6 +357,51 @@ def signin(settings: Settings, username: str, password: str) -> dict[str, Any]:
         return payload
 
 
+def change_password(
+    settings: Settings,
+    *,
+    user_id: str,
+    old_password: str,
+    new_password: str,
+) -> dict[str, Any]:
+    if old_password == new_password:
+        raise AppError(400, "password_unchanged", "New password must be different.")
+
+    with connection_scope(settings) as connection:
+        row = connection.execute(
+            """
+            SELECT id, username, password_hash
+            FROM users
+            WHERE id = ?
+            LIMIT 1;
+            """,
+            (user_id,),
+        ).fetchone()
+        if row is None:
+            raise AppError(401, "auth_invalid", "User does not exist.")
+
+        if not verify_password(old_password, row["password_hash"]):
+            raise AppError(400, "current_password_incorrect", "Current password is incorrect.")
+
+        now = utc_now_iso()
+        connection.execute(
+            """
+            UPDATE users
+            SET password_hash = ?, updated_at = ?
+            WHERE id = ?;
+            """,
+            (hash_password(new_password), now, row["id"]),
+        )
+        payload = _issue_login_for_user(
+            connection,
+            user_id=row["id"],
+            username=row["username"],
+            ttl_days=settings.auth_token_ttl_days,
+        )
+        connection.commit()
+        return payload
+
+
 def add_user_quota(
     settings: Settings,
     *,
