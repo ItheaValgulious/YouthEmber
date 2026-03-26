@@ -97,7 +97,17 @@ const displayTitle = computed(() => {
 
   return ui.state.locale === 'zh-CN' ? '书写中' : 'Writing';
 });
-const formattedTime = computed(() => store.formatDateTime(store.effectiveTimeOf(props.event)));
+const formattedTime = computed(() => {
+  if (store.isTask(props.event)) {
+    return props.event.time
+      ? store.formatDateTime(props.event.time)
+      : ui.state.locale === 'zh-CN'
+        ? '无期限'
+        : 'No deadline';
+  }
+
+  return store.formatDateTime(store.effectiveTimeOf(props.event));
+});
 const displayTags = computed(() =>
   store.sortDisplayTags(props.event.tags).slice(0, store.state.config.abstract_show_tag_count),
 );

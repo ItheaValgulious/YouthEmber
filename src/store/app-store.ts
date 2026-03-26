@@ -231,11 +231,18 @@ function normalizeFriend(raw: Partial<FriendRecord>, fallbackModelId: string): F
 function normalizeEvent(raw: Partial<EventRecord>): EventRecord {
   const isTaskRecord = raw.is_task === true;
   const taskStatus = isTaskStatus(raw.task_status) ? raw.task_status : isTaskRecord ? 'ongoing' : null;
+  const createdAt = raw.created_at ?? new Date().toISOString();
+  const time =
+    typeof raw.time === 'string'
+      ? raw.time.trim() || (isTaskRecord ? null : createdAt)
+      : isTaskRecord
+        ? null
+        : createdAt;
 
   return {
     id: raw.id ?? randomId('evt'),
-    created_at: raw.created_at ?? new Date().toISOString(),
-    time: raw.time ?? raw.created_at ?? new Date().toISOString(),
+    created_at: createdAt,
+    time,
     title: raw.title ?? '',
     raw: raw.raw ?? '',
     is_task: isTaskRecord,

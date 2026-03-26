@@ -15,7 +15,7 @@
           <section class="paper-sheet detail-sheet">
             <div class="detail-sheet__head row between wrap">
               <div class="detail-sheet__title-block">
-                <div class="handwritten detail-sheet__time">{{ store.formatDateTime(store.effectiveTimeOf(event)) }}</div>
+                <div class="handwritten detail-sheet__time">{{ displayTime }}</div>
                 <h1 class="ink-title detail-sheet__title">{{ displayTitle }}</h1>
               </div>
 
@@ -188,6 +188,23 @@ const displayTitle = computed(() => {
   }
 
   return ui.state.locale === 'zh-CN' ? '书写中' : 'Writing';
+});
+
+const displayTime = computed(() => {
+  const target = event.value;
+  if (!target) {
+    return '';
+  }
+
+  if (store.isTask(target)) {
+    return target.time
+      ? store.formatDateTime(target.time)
+      : ui.state.locale === 'zh-CN'
+        ? '无期限'
+        : 'No deadline';
+  }
+
+  return store.formatDateTime(store.effectiveTimeOf(target));
 });
 
 async function submitComment(): Promise<void> {
