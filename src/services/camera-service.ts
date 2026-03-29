@@ -28,10 +28,14 @@ export class CameraService {
       quality: 90,
       resultType: CameraResultType.Uri,
       source: CameraSource.Camera,
-      saveToGallery: false,
+      saveToGallery: isNativePlatform(),
       correctOrientation: true,
       webUseInput: true,
     });
+
+    if (isNativePlatform() && photo.saved === false) {
+      throw new Error('Failed to save the photo to the system camera album.');
+    }
 
     return fileService.saveCameraPhoto(photo);
   }
