@@ -30,7 +30,6 @@ export interface EventEnrichmentResult {
 }
 
 export interface FriendCommentResult {
-  attitude: number;
   comment: string;
   memory: string;
 }
@@ -381,7 +380,6 @@ class AiService {
 
   parseFriendComment(rawText: string): FriendCommentResult {
     const record = asRecord(parseStructuredContent(rawText));
-    const attitude = Math.min(1, Math.max(0, asNumber(record.attitude, 'attitude')));
     const comment = asString(record.comment, 'comment');
     const memory = asString(record.memory, 'memory');
 
@@ -390,7 +388,6 @@ class AiService {
     }
 
     return {
-      attitude: Number(attitude.toFixed(2)),
       comment,
       memory,
     };

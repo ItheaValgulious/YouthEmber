@@ -182,9 +182,8 @@ export function buildFriendCommentPrompt(input: {
     ].join('\n'),
     user: [
       '输出 JSON 结构：',
-      '{"attitude":0.0,"comment":"string","memory":"string"}',
+      '{"comment":"string","memory":"string"}',
       '要求：',
-      '- attitude 是 [0,1] 之间的小数。',
       '- comment 必须像朋友说话，不要像系统提示，不要提到 JSON。',
       '- comment 用中文，避免空泛说教。',
       `- memory 必须返回更新后的完整记忆文本，总长度不超过 ${input.memoryMaxLength} 个字符。`,
@@ -202,7 +201,6 @@ export function buildFriendCommentPrompt(input: {
             id: input.friend.id,
             name: input.friend.name,
             soul: input.friend.soul,
-            system_prompt: input.friend.system_prompt,
           },
           replied_comment: input.repliedComment ? serializeComment(input.repliedComment) : null,
           current_memory: input.memory,

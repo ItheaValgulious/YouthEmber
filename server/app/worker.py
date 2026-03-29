@@ -447,7 +447,22 @@ class TaskWorker:
                     continue
                 cloned_message = copy.deepcopy(message)
                 cloned_message["content"] = self._content_to_text(message.get("content"))
-                cleaned_messages.append(cloned_message)
+
+                cleaned_message: dict[str, Any] = {}
+                for key, value in cloned_message.items():
+                    lower_key = str(key).strip().lower()
+                    if lower_key in {"image_url", "input_image", "image", "images"}:
+                        continue
+
+                    if self._is_image_part(value):
+                        continue
+
+                    if isinstance(value, list) and any(self._is_image_part(item) for item in value):
+                        continue
+
+                    cleaned_message[key] = value
+
+                cleaned_messages.append(cleaned_message)
 
         cleaned_messages.append(
             {

@@ -1140,18 +1140,19 @@ function resetJobError(job: PendingAiJob): void {
 
 function scheduleJobRetry(job: PendingAiJob, stage: RunnableAiJobStatus, error: unknown): void {
   const message = error instanceof Error ? error.message : 'Unknown job error';
-  if (job.retry_count < RETRY_DELAYS.length) {
-    job.retry_count += 1;
-    job.resume_status = stage;
-    job.status = 'waiting_retry';
-    job.run_at = new Date(Date.now() + RETRY_DELAYS[job.retry_count - 1]).toISOString();
-    job.last_error = message;
-    return;
-  }
-
-  job.status = 'failed';
-  job.resume_status = undefined;
+  job.retry_count += 1;
+  job.resume_status = stage;
+  job.status = 'waiting_retry';
+  const delayIndex = Math.min(job.retry_count - 1, RETRY_DELAYS.length - 1);
+  job.run_at = new Date(Date.now() + RETRY_DELAYS[delayIndex]).toISOString();
   job.last_error = message;
+}
+
+function queueAckThenFail(job: PendingAiJob, error: unknown, remoteErrorCode?: string): void {
+  job.payload.finalize_failed = true;
+  job.payload.final_error_message = error instanceof Error ? error.message : 'Unknown job error';
+  job.payload.final_error_code = remoteErrorCode;
+  beginNextJobStage(job, 'ack_remote_task');
 }
 
 function failJob(job: PendingAiJob, error: unknown, remoteErrorCode?: string): void {
@@ -1261,6 +1262,11 @@ function queueFriendJobs(
     .filter((friend) => friend.enabled)
     .forEach((friend) => {
       if (trigger.kind === 'comment' && trigger.sender && friend.id === trigger.sender) {
+        return;
+      }
+
+      const probability = clamp(friend.active, 0, 1);
+      if (Math.random() > probability) {
         return;
       }
 
@@ -1860,7 +1866,6 @@ function handleRemoteStageError(job: PendingAiJob, stage: RunnableAiJobStatus, e
 function queueFriendDeliveryJob(input: {
   eventId: string;
   friendId: string;
-  attitude: number;
   comment: string;
   replyToCommentId?: string;
   runAt: string;
@@ -1889,7 +1894,6 @@ function queueFriendDeliveryJob(input: {
       phase: 'deliver',
       event_id: input.eventId,
       friend_id: input.friendId,
-      attitude: input.attitude,
       comment: input.comment,
       reply_to_comment_id: input.replyToCommentId,
     },
@@ -2008,7 +2012,7 @@ async function createRemoteTaskForJob(job: PendingAiJob): Promise<void> {
   }
 
   if (task.state === 'failed') {
-    failJob(job, new Error(task.error_message || 'Remote task failed.'), task.error_code ?? undefined);
+    queueAckThenFail(job, new Error(task.error_message || 'Remote task failed.'), task.error_code ?? undefined);
     return;
   }
 
@@ -2041,7 +2045,7 @@ async function pollRemoteTaskForJob(job: PendingAiJob): Promise<void> {
   }
 
   if (task.state === 'failed') {
-    failJob(job, new Error(task.error_message || 'Remote task failed.'), task.error_code ?? undefined);
+    queueAckThenFail(job, new Error(task.error_message || 'Remote task failed.'), task.error_code ?? undefined);
     return;
   }
 
@@ -2053,7 +2057,6 @@ async function applyRemoteResultForJob(job: PendingAiJob): Promise<void> {
     const event = getEventById(String(job.payload.event_id));
     const friendId = String(job.payload.friend_id);
     const comment = String(job.payload.comment ?? '').trim();
-    const attitude = Number(job.payload.attitude);
     const replyToCommentId =
       typeof job.payload.reply_to_comment_id === 'string' && job.payload.reply_to_comment_id.trim()
         ? job.payload.reply_to_comment_id.trim()
@@ -2071,7 +2074,7 @@ async function applyRemoteResultForJob(job: PendingAiJob): Promise<void> {
       return;
     }
 
-    await addComment(event.id, comment, friendId, Number.isFinite(attitude) ? attitude : undefined, replyToCommentId);
+    await addComment(event.id, comment, friendId, undefined, replyToCommentId);
     completeJob(job);
     return;
   }
@@ -2125,27 +2128,18 @@ async function applyRemoteResultForJob(job: PendingAiJob): Promise<void> {
     const candidate = aiService.parseFriendComment(rawResponse);
     await writeFriendMemory(friend, candidate.memory);
 
-    const baseProbability = friend.active * candidate.attitude;
-    const probability =
-      sourceComment && sourceComment.sender !== 'user'
-        ? clamp(baseProbability, 0, 1) * friend.ai_active
-        : baseProbability;
-
-    if (Math.random() <= probability) {
-      const delayMinutes = Math.round((friend.latency + candidate.attitude * (1 - candidate.attitude)) * 60);
-      const scaledDelay = Math.max(
-        600,
-        Math.round(Math.max(1, delayMinutes) * DEMO_DELAY_UNIT_MS * (1.2 - clamp(friend.active, 0, 1) * 0.4)),
-      );
-      queueFriendDeliveryJob({
-        eventId: event.id,
-        friendId: friend.id,
-        attitude: candidate.attitude,
-        comment: candidate.comment,
-        replyToCommentId: sourceComment?.id,
-        runAt: new Date(Date.now() + scaledDelay).toISOString(),
-      });
-    }
+    const delayMinutes = Math.round(friend.latency * 60);
+    const scaledDelay = Math.max(
+      600,
+      Math.round(Math.max(1, delayMinutes) * DEMO_DELAY_UNIT_MS * (1.2 - clamp(friend.active, 0, 1) * 0.4)),
+    );
+    queueFriendDeliveryJob({
+      eventId: event.id,
+      friendId: friend.id,
+      comment: candidate.comment,
+      replyToCommentId: sourceComment?.id,
+      runAt: new Date(Date.now() + scaledDelay).toISOString(),
+    });
 
     beginNextJobStage(job, 'ack_remote_task');
     return;
@@ -2179,6 +2173,18 @@ async function ackRemoteTaskForJob(job: PendingAiJob): Promise<void> {
   job.remote_status = 'acknowledged';
   job.remote_response = undefined;
   resetJobError(job);
+  if (job.payload.finalize_failed) {
+    const message =
+      typeof job.payload.final_error_message === 'string' && job.payload.final_error_message.trim()
+        ? job.payload.final_error_message
+        : 'Remote task failed.';
+    const code = typeof job.payload.final_error_code === 'string' ? job.payload.final_error_code : undefined;
+    delete job.payload.finalize_failed;
+    delete job.payload.final_error_message;
+    delete job.payload.final_error_code;
+    failJob(job, new Error(message), code);
+    return;
+  }
   completeJob(job);
 }
 
@@ -2227,7 +2233,7 @@ async function executeJob(job: PendingAiJob): Promise<void> {
     await ackRemoteTaskForJob(job);
   } catch (error) {
     if (stage === 'apply_remote_result') {
-      failJob(job, error, error instanceof ServerError ? error.code : undefined);
+      queueAckThenFail(job, error, error instanceof ServerError ? error.code : undefined);
       return;
     }
 
@@ -2337,6 +2343,21 @@ async function exportJsonSnapshot(): Promise<void> {
 
   await fileService.exportTextFile(
     `ashdairy-${toDateKey(new Date())}.json`,
+    JSON.stringify(payload, null, 2),
+    'application/json;charset=utf-8',
+  );
+}
+
+async function exportAiJobs(): Promise<void> {
+  const payload = {
+    schema_version: 1,
+    exported_at: new Date().toISOString(),
+    count: state.ai_jobs.length,
+    ai_jobs: state.ai_jobs,
+  };
+
+  await fileService.exportTextFile(
+    `ashdairy-ai-jobs-${toDateKey(new Date())}.json`,
     JSON.stringify(payload, null, 2),
     'application/json;charset=utf-8',
   );
@@ -2653,6 +2674,12 @@ export async function initializeAppStore(): Promise<void> {
   }
 
   bootstrapped = true;
+  const nowIso = new Date().toISOString();
+  for (const job of state.ai_jobs) {
+    if (job.status !== 'done' && job.status !== 'failed') {
+      job.run_at = nowIso;
+    }
+  }
   runDueTaskFailures();
   await syncAllTaskNotifications();
   ensureDailySummaries(false, false);
@@ -2660,6 +2687,7 @@ export async function initializeAppStore(): Promise<void> {
   scheduleTaskDeadlinePump();
   scheduleSummaryCheckPump();
   await persistAllRelationalState();
+  await runDueAiJobs();
   scheduleAiPump();
 }
 
@@ -2704,6 +2732,7 @@ export function useAppStore(): {
   addFriend: typeof addFriend;
   removeFriend: typeof removeFriend;
   exportJsonSnapshot: typeof exportJsonSnapshot;
+  exportAiJobs: typeof exportAiJobs;
   importJsonSnapshot: typeof importJsonSnapshot;
   exportDiaryHtml: typeof exportDiaryHtml;
   exportMailsHtml: typeof exportMailsHtml;
@@ -2751,6 +2780,7 @@ export function useAppStore(): {
     addFriend,
     removeFriend,
     exportJsonSnapshot,
+    exportAiJobs,
     importJsonSnapshot,
     exportDiaryHtml,
     exportMailsHtml,
@@ -2758,5 +2788,3 @@ export function useAppStore(): {
     consumeComposerAssets,
   };
 }
-
-

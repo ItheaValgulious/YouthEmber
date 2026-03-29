@@ -410,6 +410,9 @@
               <ion-button fill="outline" :disabled="busy" @click="runAction(() => store.exportMailsHtml())">
                 {{ ui.t('export_mails') }}
               </ion-button>
+              <ion-button fill="outline" :disabled="busy" @click="runAction(() => store.exportAiJobs())">
+                {{ ui.t('export_ai_jobs') }}
+              </ion-button>
             </div>
 
             <input ref="importInput" hidden accept="application/json" type="file" @change="handleImport" />
