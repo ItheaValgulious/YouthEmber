@@ -1,10 +1,28 @@
 [
   {
-    "id": "deepseek-v3",
-    "name": "DeepSeek V3",
+    "id": "deepseek-chat",
+    "name": "Deepseek Chat",
     "baseurl": "https://models.sjtu.edu.cn/api/v1",
     "apikey_env": "ASHDAIRY_SJTU_API_KEY",
-    "model": "deepseek-v3",
+    "model": "deepseek-chat",
+    "dealing_img": false,
+    "timeout_seconds": 90
+  },
+  {
+    "id": "deepseek-reasoner",
+    "name": "Deepseek Reasoner",
+    "baseurl": "https://models.sjtu.edu.cn/api/v1",
+    "apikey_env": "ASHDAIRY_SJTU_API_KEY",
+    "model": "deepseek-reasoner",
+    "dealing_img": false,
+    "timeout_seconds": 300
+  },
+  {
+    "id": "minimax",
+    "name": "Minimax",
+    "baseurl": "https://models.sjtu.edu.cn/api/v1",
+    "apikey_env": "ASHDAIRY_SJTU_API_KEY",
+    "model": "minimax",
     "dealing_img": false,
     "timeout_seconds": 90
   },
