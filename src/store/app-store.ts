@@ -63,6 +63,9 @@ const SUMMARY_LABELS: Record<SummaryInterval, string> = {
   '3m': '3m Summary',
   '1y': '1y Summary',
 };
+const MAX_JOBS_PER_CYCLE = 5;
+const FAILED_JOB_WEIGHT = 10; // penalize failed/waiting_retry jobs in priority
+const BOOTSTRAP_MAX_JOBS = 20; // limit jobs at bootstrap to avoid blocking
 
 let aiTimer: number | null = null;
 let taskDeadlineTimer: number | null = null;
@@ -2241,7 +2244,7 @@ async function executeJob(job: PendingAiJob): Promise<void> {
   }
 }
 
-async function runDueAiJobs(): Promise<void> {
+async function runDueAiJobs(isBootstrap = false): Promise<void> {
   if (aiPumpRunning) {
     return;
   }
@@ -2249,12 +2252,22 @@ async function runDueAiJobs(): Promise<void> {
   aiPumpRunning = true;
   const now = Date.now();
   try {
-    const dueJobs = state.ai_jobs
+    // Sort by priority: newer jobs first, but failed/waiting_retry jobs get penalized
+    const sortedJobs = state.ai_jobs
       .filter((job) => job.status !== 'done' && job.status !== 'failed' && new Date(job.run_at).getTime() <= now)
-      .sort((left, right) => new Date(left.run_at).getTime() - new Date(right.run_at).getTime());
+      .sort((left, right) => {
+        // Penalize failed/waiting_retry jobs to deprioritize them
+        const leftWeight = left.status === 'waiting_retry' ? FAILED_JOB_WEIGHT : 0;
+        const rightWeight = right.status === 'waiting_retry' ? FAILED_JOB_WEIGHT : 0;
+        const leftScore = new Date(left.run_at).getTime() + leftWeight * 60_000;
+        const rightScore = new Date(right.run_at).getTime() + rightWeight * 60_000;
+        // Newer jobs first (descending)
+        return rightScore - leftScore;
+      })
+      .slice(0, isBootstrap ? BOOTSTRAP_MAX_JOBS : MAX_JOBS_PER_CYCLE);
 
-    const createRemoteTaskJobs = dueJobs.filter((job) => normalizeRunnableJobStatus(job) === 'create_remote_task');
-    const nonCreateJobs = dueJobs.filter((job) => normalizeRunnableJobStatus(job) !== 'create_remote_task');
+    const createRemoteTaskJobs = sortedJobs.filter((job) => normalizeRunnableJobStatus(job) === 'create_remote_task');
+    const nonCreateJobs = sortedJobs.filter((job) => normalizeRunnableJobStatus(job) !== 'create_remote_task');
     let shouldPersistBeforeCreate = false;
 
     for (const job of createRemoteTaskJobs) {
@@ -2280,7 +2293,7 @@ async function runDueAiJobs(): Promise<void> {
     }
 
     state.ai_jobs = state.ai_jobs.filter((job) => job.status !== 'done').slice(-40);
-    if (dueJobs.length) {
+    if (sortedJobs.length) {
       await persistAiJobsState();
     }
   } finally {
@@ -2687,7 +2700,7 @@ export async function initializeAppStore(): Promise<void> {
   scheduleTaskDeadlinePump();
   scheduleSummaryCheckPump();
   await persistAllRelationalState();
-  await runDueAiJobs();
+  // Don't await runDueAiJobs — run in background to not block UI
   scheduleAiPump();
 }
 
