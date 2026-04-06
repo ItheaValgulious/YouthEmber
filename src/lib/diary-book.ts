@@ -15,7 +15,7 @@ import type {
   SummaryRecord,
 } from '../types/models';
 
-const DIARY_BOOK_VERSION = 4;
+const DIARY_BOOK_VERSION = 5;
 const BASE_PAGE_WIDTH = 1760;
 const BASE_PAGE_HEIGHT = 2500;
 const BASE_MARGIN_X = 140;
@@ -27,9 +27,6 @@ const BASE_MAIN_WIDTH = 920;
 const BASE_IMAGE_WIDTH = 620;
 const BASE_IMAGE_HEIGHT = 440;
 const BASE_SUMMARY_WIDTH = 1080;
-const BASE_TEXT_CHARS_PER_CARD = 420;
-const BASE_SUMMARY_CHARS_PER_CARD = 620;
-const BASE_COMMENT_CHARS_PER_GROUP = 260;
 
 let B5_PAGE_WIDTH = BASE_PAGE_WIDTH;
 let B5_PAGE_HEIGHT = BASE_PAGE_HEIGHT;
@@ -44,9 +41,6 @@ let SIDE_WIDTH = FULL_WIDTH - MAIN_WIDTH - B5_COLUMN_GAP;
 let IMAGE_WIDTH = BASE_IMAGE_WIDTH;
 let IMAGE_HEIGHT = BASE_IMAGE_HEIGHT;
 let SUMMARY_WIDTH = BASE_SUMMARY_WIDTH;
-let TEXT_CHARS_PER_CARD = BASE_TEXT_CHARS_PER_CARD;
-let SUMMARY_CHARS_PER_CARD = BASE_SUMMARY_CHARS_PER_CARD;
-let COMMENT_CHARS_PER_GROUP = BASE_COMMENT_CHARS_PER_GROUP;
 let DIARY_FONT_SCALE = 1;
 
 type DiarySourceItem =
@@ -212,7 +206,6 @@ function readPaperMetrics(paperSize: DiaryPaperSize): {
 
 function applyPaperMetrics(paperSize: DiaryPaperSize, fontScale: number): void {
   const metrics = readPaperMetrics(paperSize);
-  const paperScale = paperScaleOf(paperSize);
 
   B5_PAGE_WIDTH = metrics.pageWidth;
   B5_PAGE_HEIGHT = metrics.pageHeight;
@@ -228,233 +221,6 @@ function applyPaperMetrics(paperSize: DiaryPaperSize, fontScale: number): void {
   IMAGE_HEIGHT = metrics.imageHeight;
   SUMMARY_WIDTH = metrics.summaryWidth;
   DIARY_FONT_SCALE = clamp(Number.isFinite(fontScale) ? fontScale : 1, 0.85, 1.35);
-  TEXT_CHARS_PER_CARD = Math.max(140, Math.round((BASE_TEXT_CHARS_PER_CARD * paperScale) / DIARY_FONT_SCALE));
-  SUMMARY_CHARS_PER_CARD = Math.max(220, Math.round((BASE_SUMMARY_CHARS_PER_CARD * paperScale) / DIARY_FONT_SCALE));
-  COMMENT_CHARS_PER_GROUP = Math.max(120, Math.round((BASE_COMMENT_CHARS_PER_GROUP * paperScale) / DIARY_FONT_SCALE));
-}
-
-function hashString(value: string): number {
-  let hash = 0;
-  for (let index = 0; index < value.length; index += 1) {
-    hash = (hash * 31 + value.charCodeAt(index)) | 0;
-  }
-  return Math.abs(hash);
-}
-
-function splitLongSegment(segment: string, maxChars: number): string[] {
-  const parts: string[] = [];
-  let rest = segment.trim();
-
-  while (rest.length > maxChars) {
-    const slice = rest.slice(0, maxChars + 1);
-    const breakpoints = ['\n', '.', '!', '?', ';', ',', ' '];
-    let breakIndex = -1;
-
-    for (const token of breakpoints) {
-      const index = slice.lastIndexOf(token);
-      if (index > Math.floor(maxChars * 0.55)) {
-        breakIndex = Math.max(breakIndex, index + 1);
-      }
-    }
-
-    if (breakIndex <= 0) {
-      breakIndex = maxChars;
-    }
-
-    parts.push(rest.slice(0, breakIndex).trim());
-    rest = rest.slice(breakIndex).trim();
-  }
-
-  if (rest) {
-    parts.push(rest);
-  }
-
-  return parts.length ? parts : [''];
-}
-
-function splitText(value: string, maxChars: number): string[] {
-  const normalized = value.replace(/\r\n/g, '\n').trim();
-  if (!normalized) {
-    return [];
-  }
-
-  const paragraphs = normalized
-    .split(/\n{2,}/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-
-  const chunks: string[] = [];
-  let current = '';
-
-  const flush = (): void => {
-    const trimmed = current.trim();
-    if (trimmed) {
-      chunks.push(trimmed);
-    }
-    current = '';
-  };
-
-  for (const paragraph of paragraphs.length ? paragraphs : [normalized]) {
-    if (paragraph.length > maxChars) {
-      if (current) {
-        flush();
-      }
-      chunks.push(...splitLongSegment(paragraph, maxChars));
-      continue;
-    }
-
-    const next = current ? `${current}\n\n${paragraph}` : paragraph;
-    if (next.length > maxChars) {
-      flush();
-      current = paragraph;
-      continue;
-    }
-
-    current = next;
-  }
-
-  flush();
-  return chunks;
-}
-
-function groupComments(
-  comments: CommentRecord[],
-  context: DiaryBookBuildContext,
-): Array<DiaryRowCommentBlock['comments']> {
-  const ordered = comments
-    .slice()
-    .sort((left, right) => new Date(left.time).getTime() - new Date(right.time).getTime());
-
-  const groups: Array<DiaryRowCommentBlock['comments']> = [];
-  let current: DiaryRowCommentBlock['comments'] = [];
-  let currentChars = 0;
-
-  for (const comment of ordered) {
-    const chunks = splitText(comment.content, COMMENT_CHARS_PER_GROUP);
-    const normalizedChunks = chunks.length ? chunks : [''];
-
-    for (const content of normalizedChunks) {
-      const nextLength = currentChars + content.length;
-      if (current.length && (current.length >= 2 || nextLength > COMMENT_CHARS_PER_GROUP * 1.6)) {
-        groups.push(current);
-        current = [];
-        currentChars = 0;
-      }
-
-      current.push({
-        id: comment.id,
-        sender: context.friendName(comment.sender),
-        time_label: context.formatDateTime(comment.time),
-        content,
-      });
-      currentChars += content.length;
-    }
-  }
-
-  if (current.length) {
-    groups.push(current);
-  }
-
-  return groups;
-}
-
-function estimateTextHeight(body: string, width: number, bodyKind: 'text' | 'title_only'): number {
-  if (bodyKind === 'title_only') {
-    return clamp(Math.round(240 * DIARY_FONT_SCALE), 220, 380);
-  }
-
-  const bodyFontSize = 26 * DIARY_FONT_SCALE;
-  const lineHeight = bodyFontSize * 1.7;
-  const charsPerLine = Math.max(10, Math.floor((width - 48 * DIARY_FONT_SCALE) / Math.max(bodyFontSize * 0.94, 1)));
-  const lines = Math.max(1, Math.ceil(Math.max(body.length, 1) / charsPerLine));
-  const headingHeight = 150 * DIARY_FONT_SCALE;
-  const paddingAllowance = 52 * DIARY_FONT_SCALE;
-
-  return clamp(
-    Math.ceil(headingHeight + paddingAllowance + lines * lineHeight),
-    Math.round(300 * DIARY_FONT_SCALE),
-    Math.round(1360 * DIARY_FONT_SCALE),
-  );
-}
-
-function shouldSplitCommentCards(layout: DiaryRowCommentBlock['layout'], width: number, count: number): boolean {
-  return layout === 'row' && count === 2 && width >= 920;
-}
-
-function estimateCommentMetaHeight(comment: DiaryRowCommentBlock['comments'][number], width: number): number {
-  const metaFontSize = 20 * DIARY_FONT_SCALE;
-  const lineHeight = metaFontSize * 1.35;
-  const charsPerLine = Math.max(8, Math.floor((width - 28 * DIARY_FONT_SCALE) / Math.max(metaFontSize * 0.9, 1)));
-  const metaLength = `${comment.sender} ${comment.time_label}`.trim().length;
-  const lines = Math.max(1, Math.ceil(Math.max(metaLength, 1) / charsPerLine));
-
-  return Math.ceil(lines * lineHeight);
-}
-
-function estimateCommentCardHeight(comment: DiaryRowCommentBlock['comments'][number], width: number): number {
-  const bodyFontSize = 22 * DIARY_FONT_SCALE;
-  const lineHeight = bodyFontSize * 1.62;
-  const charsPerLine = Math.max(8, Math.floor((width - 28 * DIARY_FONT_SCALE) / Math.max(bodyFontSize * 0.96, 1)));
-  const lines = Math.max(1, Math.ceil(Math.max(comment.content.length, 1) / charsPerLine));
-  const metaHeight = estimateCommentMetaHeight(comment, width);
-  const chromeHeight = 52 * DIARY_FONT_SCALE;
-
-  return Math.ceil(chromeHeight + metaHeight + lines * lineHeight);
-}
-
-function estimateCommentHeight(
-  comments: DiaryRowCommentBlock['comments'],
-  width: number,
-  layout: DiaryRowCommentBlock['layout'],
-): number {
-  const gap = Math.round(14 * DIARY_FONT_SCALE);
-
-  if (shouldSplitCommentCards(layout, width, comments.length)) {
-    const cardWidth = Math.floor((width - gap) / 2);
-    const tallest = Math.max(...comments.map((comment) => estimateCommentCardHeight(comment, cardWidth)));
-    return clamp(tallest, Math.round(220 * DIARY_FONT_SCALE), Math.round(760 * DIARY_FONT_SCALE));
-  }
-
-  const height =
-    comments.reduce((sum, comment) => sum + estimateCommentCardHeight(comment, width), 0) +
-    gap * Math.max(0, comments.length - 1);
-
-  return clamp(height, Math.round(220 * DIARY_FONT_SCALE), Math.round(980 * DIARY_FONT_SCALE));
-}
-
-function estimateSummaryHeight(body: string, width: number): number {
-  const bodyFontSize = 26 * DIARY_FONT_SCALE;
-  const lineHeight = bodyFontSize * 1.7;
-  const charsPerLine = Math.max(12, Math.floor((width - 44 * DIARY_FONT_SCALE) / Math.max(bodyFontSize * 0.94, 1)));
-  const lines = Math.max(2, Math.ceil(Math.max(body.length, 1) / charsPerLine));
-  const headingHeight = 170 * DIARY_FONT_SCALE;
-  const paddingAllowance = 48 * DIARY_FONT_SCALE;
-
-  return clamp(
-    Math.ceil(headingHeight + paddingAllowance + lines * lineHeight),
-    Math.round(320 * DIARY_FONT_SCALE),
-    Math.round(1120 * DIARY_FONT_SCALE),
-  );
-}
-
-function estimateImageHeight(asset: AssetRecord): number {
-  const width = typeof asset.width === 'number' && asset.width > 0 ? asset.width : null;
-  const height = typeof asset.height === 'number' && asset.height > 0 ? asset.height : null;
-  if (!width || !height) {
-    return IMAGE_HEIGHT;
-  }
-
-  const aspectRatio = height / width;
-  if (aspectRatio <= 1.08) {
-    return IMAGE_HEIGHT;
-  }
-
-  const portraitBoost = clamp(aspectRatio, 1.08, 2.2);
-  return clamp(
-    Math.round(IMAGE_HEIGHT * (1 + (portraitBoost - 1.08) * 0.7)),
-    IMAGE_HEIGHT,
-    Math.round(IMAGE_HEIGHT * 2.1),
-  );
 }
 
 function buildSourceKey(kind: DiarySourceKey['kind'], id: string, date: string): DiarySourceKey {
@@ -538,31 +304,218 @@ function toOtherAssetLabels(event: EventRecord): DiaryPlacedEventTextBlock['othe
     }));
 }
 
-function buildEventRows(item: Extract<DiarySourceItem, { kind: 'event' }>, context: DiaryBookBuildContext): DiaryRow[] {
+type TextMeasureContext = {
+  context: CanvasRenderingContext2D | null;
+};
+
+const textMeasureCache = new Map<number, TextMeasureContext>();
+
+function getTextMeasureContext(fontSize: number): TextMeasureContext {
+  const cached = textMeasureCache.get(fontSize);
+  if (cached) {
+    return cached;
+  }
+
+  let context: CanvasRenderingContext2D | null = null;
+  if (typeof document !== 'undefined') {
+    const canvas = document.createElement('canvas');
+    context = canvas.getContext('2d');
+    if (context) {
+      context.textBaseline = 'alphabetic';
+      context.font = `${Math.max(1, Math.round(fontSize))}px Georgia, "Times New Roman", serif`;
+    }
+  }
+
+  const result = { context };
+  textMeasureCache.set(fontSize, result);
+  return result;
+}
+
+function measureTextWidth(text: string, fontSize: number): number {
+  const measureContext = getTextMeasureContext(fontSize);
+  if (measureContext.context) {
+    measureContext.context.font = `${Math.max(1, Math.round(fontSize))}px Georgia, "Times New Roman", serif`;
+    return measureContext.context.measureText(text).width * 1.03;
+  }
+
+  return Math.max(fontSize, text.length * fontSize * 0.56);
+}
+
+function splitIntoGraphemes(text: string): string[] {
+  if (typeof Intl !== 'undefined' && typeof Intl.Segmenter !== 'undefined') {
+    const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+    return Array.from(segmenter.segment(text), (segment) => segment.segment);
+  }
+
+  return Array.from(text);
+}
+
+function wrapTextLines(text: string, width: number, fontSize: number): string[] {
+  const normalized = text.replace(/\r\n/g, '\n').replace(/\t/g, ' ');
+  const paragraphs = normalized.split('\n');
+  const lines: string[] = [];
+
+  for (const paragraph of paragraphs) {
+    if (!paragraph.trim()) {
+      lines.push('');
+      continue;
+    }
+
+    let current = '';
+    for (const character of splitIntoGraphemes(paragraph)) {
+      const candidate = current + character;
+      if (current && measureTextWidth(candidate, fontSize) > width) {
+        lines.push(current.trimEnd());
+        current = character.trimStart();
+        if (!current) {
+          continue;
+        }
+      } else {
+        current = candidate;
+      }
+    }
+
+    if (current) {
+      lines.push(current.trimEnd());
+    }
+  }
+
+  return lines.length ? lines : [''];
+}
+
+function chunkLines(lines: string[], maxLines: number): string[][] {
+  if (!lines.length) {
+    return [];
+  }
+
+  const chunks: string[][] = [];
+  let current: string[] = [];
+
+  for (const line of lines) {
+    current.push(line);
+    if (current.length >= maxLines) {
+      chunks.push(current);
+      current = [];
+    }
+  }
+
+  if (current.length) {
+    chunks.push(current);
+  }
+
+  return chunks;
+}
+
+function splitTextIntoChunks(text: string, width: number, fontSize: number, lineHeight: number, maxHeight: number): string[] {
+  const lines = wrapTextLines(text, width, fontSize);
+  const maxLines = Math.max(1, Math.floor(maxHeight / lineHeight));
+  return chunkLines(lines, maxLines).map((chunk) => chunk.join('\n').trimEnd()).filter((chunk) => chunk.length > 0);
+}
+
+function measureEventTextMetrics(title: string, width: number, assetCount: number): {
+  paddingX: number;
+  paddingY: number;
+  bodyWidth: number;
+  eyebrowLineHeight: number;
+  titleLineHeight: number;
+  bodyLineHeight: number;
+  noteLineHeight: number;
+  headerHeight: number;
+  assetHeight: number;
+  titleWidth: number;
+} {
+  const paddingX = Math.round(28 * DIARY_FONT_SCALE);
+  const paddingY = Math.round(24 * DIARY_FONT_SCALE);
+  const eyebrowFontSize = 20 * DIARY_FONT_SCALE;
+  const titleFontSize = 42 * DIARY_FONT_SCALE;
+  const bodyFontSize = 26 * DIARY_FONT_SCALE;
+  const noteFontSize = 22 * DIARY_FONT_SCALE;
+  const eyebrowLineHeight = Math.round(eyebrowFontSize * 1.35);
+  const titleLineHeight = Math.round(titleFontSize * 1.22);
+  const bodyLineHeight = Math.round(bodyFontSize * 1.78);
+  const noteLineHeight = Math.round(noteFontSize * 1.65);
+  const titleWidth = Math.max(160, Math.floor(width - paddingX * 2));
+  const titleLines = Math.max(1, wrapTextLines(title || '', titleWidth, titleFontSize).length);
+  const headerHeight = eyebrowLineHeight + Math.round(10 * DIARY_FONT_SCALE) + titleLines * titleLineHeight;
+  const assetHeight = assetCount > 0 ? Math.round(48 * DIARY_FONT_SCALE) + Math.ceil(assetCount / 3) * Math.round(42 * DIARY_FONT_SCALE) : 0;
+
+  return {
+    paddingX,
+    paddingY,
+    bodyWidth: titleWidth,
+    eyebrowLineHeight,
+    titleLineHeight,
+    bodyLineHeight,
+    noteLineHeight,
+    headerHeight,
+    assetHeight,
+    titleWidth,
+  };
+}
+
+function measureSummaryMetrics(width: number, title: string): {
+  paddingX: number;
+  paddingY: number;
+  titleWidth: number;
+  metaLineHeight: number;
+  titleLineHeight: number;
+  bodyLineHeight: number;
+  headerHeight: number;
+} {
+  const paddingX = Math.round(20 * DIARY_FONT_SCALE);
+  const paddingY = Math.round(18 * DIARY_FONT_SCALE);
+  const metaFontSize = 20 * DIARY_FONT_SCALE;
+  const titleFontSize = 34 * DIARY_FONT_SCALE;
+  const bodyFontSize = 26 * DIARY_FONT_SCALE;
+  const metaLineHeight = Math.round(metaFontSize * 1.4);
+  const titleLineHeight = Math.round(titleFontSize * 1.24);
+  const bodyLineHeight = Math.round(bodyFontSize * 1.78);
+  const titleWidth = Math.max(160, Math.floor(width - paddingX * 2));
+  const titleLines = Math.max(1, wrapTextLines(title || '', titleWidth, titleFontSize).length);
+
+  return {
+    paddingX,
+    paddingY,
+    titleWidth,
+    metaLineHeight,
+    titleLineHeight,
+    bodyLineHeight,
+    headerHeight: metaLineHeight + Math.round(10 * DIARY_FONT_SCALE) + titleLines * titleLineHeight,
+  };
+}
+
+function fitImageBox(asset: AssetRecord): { width: number; height: number } {
+  const maxWidth = Math.max(240, Math.floor(FULL_WIDTH));
+  const maxHeight = Math.max(320, Math.floor((B5_PAGE_HEIGHT - B5_MARGIN_TOP - B5_MARGIN_BOTTOM) * 0.92));
+  const naturalWidth = typeof asset.width === 'number' && asset.width > 0 ? asset.width : 4;
+  const naturalHeight = typeof asset.height === 'number' && asset.height > 0 ? asset.height : 3;
+  const scale = Math.min(maxWidth / naturalWidth, maxHeight / naturalHeight);
+
+  return {
+    width: Math.max(240, Math.min(maxWidth, Math.round(naturalWidth * scale))),
+    height: Math.max(220, Math.min(maxHeight, Math.round(naturalHeight * scale))),
+  };
+}
+
+function buildEventRowsDeterministic(item: Extract<DiarySourceItem, { kind: 'event' }>, context: DiaryBookBuildContext): DiaryRow[] {
   const { event, key } = item;
   const rows: DiaryRow[] = [];
-  const bodyParts = splitText(event.raw, TEXT_CHARS_PER_CARD);
-  const images = event.assets
-    .filter((asset) => asset.type === 'image')
-    .slice()
-    .sort((left, right) => left.upload_order - right.upload_order);
-  const otherAssets = toOtherAssetLabels(event);
-  const commentGroups = groupComments(event.comments, context);
-  const totalCommentChars = commentGroups.flat().reduce((sum, comment) => sum + comment.content.length, 0);
-  const commentRowMode =
-    (bodyParts.join('').length < 220 && totalCommentChars > 240) ||
-    (!bodyParts.length && commentGroups.length > 1);
-
   const title = event.title.trim();
   const timeLabel = context.formatDateTime(event.time ?? event.created_at);
-  const variantSeed = hashString(event.id);
+  const body = event.raw.replace(/\r\n/g, '\n').trim();
+  const otherAssets = toOtherAssetLabels(event);
+  const textMetrics = measureEventTextMetrics(title, FULL_WIDTH, body ? otherAssets.length : 0);
+  const pageContentHeight = B5_PAGE_HEIGHT - B5_MARGIN_TOP - B5_MARGIN_BOTTOM;
 
-  if (!bodyParts.length && !images.length && !commentGroups.length && !otherAssets.length) {
-    const width = 980;
+  if (!body) {
+    const height = Math.ceil(
+      textMetrics.paddingY * 2 + textMetrics.headerHeight + textMetrics.noteLineHeight + Math.round(14 * DIARY_FONT_SCALE),
+    );
+
     rows.push({
       key: `${event.id}-title-only`,
       date: key.date,
-      height: 220,
+      height,
       anchor: key,
       blocks: [
         {
@@ -575,108 +528,64 @@ function buildEventRows(item: Extract<DiarySourceItem, { kind: 'event' }>, conte
           continuation: false,
           body_kind: 'title_only',
           other_assets: [],
-          x: B5_MARGIN_X + 80 + (variantSeed % 80),
-          width,
-          height: 220,
-          rotation: [-1.4, 1.2, -0.8][variantSeed % 3],
+          x: B5_MARGIN_X,
+          width: FULL_WIDTH,
+          height,
+          rotation: 0,
         },
       ],
     });
     return rows;
   }
 
-  let usedCommentGroups = 0;
-  bodyParts.forEach((body, index) => {
-    const isFirst = index === 0;
-    const canUseSideComment = !commentRowMode && isFirst && commentGroups.length > 0;
-    const textWidth = canUseSideComment ? MAIN_WIDTH : 1080;
-    const textHeight = estimateTextHeight(body, textWidth, 'text');
-    const textX = canUseSideComment ? B5_MARGIN_X + 18 : B5_MARGIN_X + 60 + (variantSeed % 120);
-    const blocks: DiaryRowBlock[] = [
-      {
-        type: 'event_text',
-        source: key,
-        event_id: event.id,
-        title,
-        time_label: timeLabel,
-        body,
-        continuation: index > 0,
-        body_kind: 'text',
-        other_assets: isFirst ? otherAssets : [],
-        x: textX,
-        width: textWidth,
-        height: textHeight,
-        rotation: [-1.6, 1.0, -0.6, 1.4][(variantSeed + index) % 4],
-      },
-    ];
+  const firstBodyAvailableHeight = Math.max(
+    120,
+    pageContentHeight - textMetrics.paddingY * 2 - textMetrics.headerHeight - textMetrics.assetHeight - Math.round(16 * DIARY_FONT_SCALE),
+  );
+  const bodyChunks = splitTextIntoChunks(body, textMetrics.bodyWidth, 26 * DIARY_FONT_SCALE, textMetrics.bodyLineHeight, firstBodyAvailableHeight);
 
-    let rowHeight = textHeight;
-    if (canUseSideComment) {
-      const comments = commentGroups[usedCommentGroups];
-      const commentHeight = estimateCommentHeight(comments, SIDE_WIDTH, 'side');
-      blocks.push({
-        type: 'comment_group',
-        source: key,
-        event_id: event.id,
-        layout: 'side',
-        comments,
-        x: B5_MARGIN_X + MAIN_WIDTH + B5_COLUMN_GAP,
-        width: SIDE_WIDTH,
-        height: commentHeight,
-        rotation: [1.8, -1.4, 1.1][(variantSeed + usedCommentGroups) % 3],
-      });
-      rowHeight = Math.max(textHeight, commentHeight);
-      usedCommentGroups += 1;
-    }
+  bodyChunks.forEach((chunk, index) => {
+    const bodyLines = Math.max(1, wrapTextLines(chunk, textMetrics.bodyWidth, 26 * DIARY_FONT_SCALE).length);
+    const height = Math.ceil(
+      textMetrics.paddingY * 2 + textMetrics.headerHeight + Math.round(16 * DIARY_FONT_SCALE) + bodyLines * textMetrics.bodyLineHeight + (index === 0 ? textMetrics.assetHeight : 0),
+    );
 
     rows.push({
       key: `${event.id}-text-${index}`,
       date: key.date,
-      height: rowHeight,
+      height,
       anchor: key,
-      blocks,
+      blocks: [
+        {
+          type: 'event_text',
+          source: key,
+          event_id: event.id,
+          title,
+          time_label: timeLabel,
+          body: chunk,
+          continuation: index > 0,
+          body_kind: 'text',
+          other_assets: index === 0 ? otherAssets : [],
+          x: B5_MARGIN_X,
+          width: FULL_WIDTH,
+          height,
+          rotation: 0,
+        },
+      ],
     });
   });
 
-  const remainingCommentGroups = commentGroups.slice(usedCommentGroups);
-  for (let index = 0; index < remainingCommentGroups.length; index += 1) {
-    const rowGroups = [remainingCommentGroups[index]];
-    const rowInset = Math.max(24, Math.round(B5_COLUMN_GAP * 0.7));
-    const firstWidth = FULL_WIDTH - rowInset * 2;
+  const images = event.assets
+    .filter((asset) => asset.type === 'image')
+    .slice()
+    .sort((left, right) => left.upload_order - right.upload_order);
 
-    const blocks: DiaryRowBlock[] = rowGroups.map((comments, groupIndex) => {
-      const width = firstWidth;
-      const x = B5_MARGIN_X + rowInset;
-
-      return {
-        type: 'comment_group',
-        source: key,
-        event_id: event.id,
-        layout: 'row',
-        comments,
-        x,
-        width,
-        height: estimateCommentHeight(comments, width, 'row'),
-        rotation: [-1.5, 1.3, -0.9, 1.1][(variantSeed + index + groupIndex) % 4],
-      };
-    });
-
-    rows.push({
-      key: `${event.id}-comments-${index}`,
-      date: key.date,
-      height: Math.max(...blocks.map((block) => block.height)),
-      anchor: key,
-      blocks,
-    });
-  }
-
-  images.forEach((asset, index) => {
-    const leftAligned = (variantSeed + index) % 2 === 0;
-    const imageHeight = estimateImageHeight(asset);
+  images.forEach((asset) => {
+    const box = fitImageBox(asset);
     rows.push({
       key: `${event.id}-image-${asset.id}`,
       date: key.date,
-      height: imageHeight,
+      height: box.height,
       anchor: key,
       blocks: [
         {
@@ -684,47 +593,154 @@ function buildEventRows(item: Extract<DiarySourceItem, { kind: 'event' }>, conte
           source: key,
           event_id: event.id,
           asset,
-          x: leftAligned ? B5_MARGIN_X + 20 : B5_PAGE_WIDTH - B5_MARGIN_X - IMAGE_WIDTH - 20,
-          width: IMAGE_WIDTH,
-          height: imageHeight,
-          rotation: leftAligned ? -2.2 : 2.0,
+          x: B5_MARGIN_X + Math.floor((FULL_WIDTH - box.width) / 2),
+          width: box.width,
+          height: box.height,
+          rotation: 0,
         },
       ],
     });
   });
 
+  const comments = event.comments
+    .slice()
+    .sort((left, right) => new Date(left.time).getTime() - new Date(right.time).getTime());
+  const outerPadding = Math.round(20 * DIARY_FONT_SCALE);
+  const cardGap = Math.round(14 * DIARY_FONT_SCALE);
+  const packedCards: Array<{ id: string; sender: string; time_label: string; content: string; height: number }> = [];
+
+  for (const comment of comments) {
+    const sender = context.friendName(comment.sender);
+    const time = context.formatDateTime(comment.time);
+    const cardWidth = FULL_WIDTH - outerPadding * 2;
+    const metaFontSize = 20 * DIARY_FONT_SCALE;
+    const bodyFontSize = 22 * DIARY_FONT_SCALE;
+    const metaLineHeight = Math.round(metaFontSize * 1.4);
+    const bodyLineHeight = Math.round(bodyFontSize * 1.68);
+    const metaLines = Math.max(1, wrapTextLines(`${sender} ${time}`.trim(), cardWidth, metaFontSize).length);
+    const maxCardHeight = Math.max(180, pageContentHeight - outerPadding * 2);
+    const availableBodyHeight = Math.max(60, maxCardHeight - Math.round(52 * DIARY_FONT_SCALE) - metaLines * metaLineHeight);
+    const fragments = splitTextIntoChunks(comment.content.replace(/\r\n/g, '\n').trim(), Math.max(160, cardWidth - 32), bodyFontSize, bodyLineHeight, availableBodyHeight);
+
+    if (!fragments.length) {
+      fragments.push('');
+    }
+
+    fragments.forEach((fragment, fragmentIndex) => {
+      const bodyLines = Math.max(1, wrapTextLines(fragment, Math.max(160, cardWidth - 32), bodyFontSize).length);
+      const height = Math.ceil(Math.round(52 * DIARY_FONT_SCALE) + metaLines * metaLineHeight + bodyLines * bodyLineHeight);
+      packedCards.push({
+        id: `${comment.id}-${fragmentIndex}`,
+        sender,
+        time_label: time,
+        content: fragment,
+        height,
+      });
+    });
+  }
+
+  let currentCards: Array<{ id: string; sender: string; time_label: string; content: string; height: number }> = [];
+  let currentHeight = outerPadding * 2;
+
+  const flush = (): void => {
+    if (!currentCards.length) {
+      return;
+    }
+
+    const height = currentHeight;
+    rows.push({
+      key: `${event.id}-comments-${rows.length}`,
+      date: key.date,
+      height,
+      anchor: key,
+      blocks: [
+        {
+          type: 'comment_group',
+          source: key,
+          event_id: event.id,
+          layout: 'side',
+          comments: currentCards.map((card) => ({
+            id: card.id,
+            sender: card.sender,
+            time_label: card.time_label,
+            content: card.content,
+          })),
+          x: B5_MARGIN_X,
+          width: FULL_WIDTH,
+          height,
+          rotation: 0,
+        },
+      ],
+    });
+    currentCards = [];
+    currentHeight = outerPadding * 2;
+  };
+
+  for (const card of packedCards) {
+    const nextHeight = currentCards.length ? currentHeight + cardGap + card.height : currentHeight + card.height;
+    if (currentCards.length && nextHeight > pageContentHeight) {
+      flush();
+    }
+
+    currentCards.push(card);
+    currentHeight = currentCards.length === 1 ? outerPadding * 2 + card.height : currentHeight + cardGap + card.height;
+  }
+
+  flush();
   return rows;
 }
 
-function buildSummaryRows(item: Extract<DiarySourceItem, { kind: 'summary' }>): DiaryRow[] {
+function buildSummaryRowsDeterministic(item: Extract<DiarySourceItem, { kind: 'summary' }>): DiaryRow[] {
   const { summary, key } = item;
   const combined = [summary.tasks.summary, summary.mood.summary, summary.summary]
     .filter(Boolean)
-    .join('\n\n');
-  const parts = splitText(combined, SUMMARY_CHARS_PER_CARD);
-  const seed = hashString(summary.id);
+    .join('\n\n')
+    .trim();
+  const metrics = measureSummaryMetrics(FULL_WIDTH, summary.title.trim());
+  const pageContentHeight = B5_PAGE_HEIGHT - B5_MARGIN_TOP - B5_MARGIN_BOTTOM;
+  const maxBodyHeight = Math.max(120, pageContentHeight - metrics.headerHeight - metrics.paddingY * 2 - Math.round(10 * DIARY_FONT_SCALE));
+  const bodyWidth = metrics.titleWidth;
+  const bodyFontSize = 26 * DIARY_FONT_SCALE;
+  const bodyLineHeight = metrics.bodyLineHeight;
+  const parts = combined ? splitTextIntoChunks(combined, bodyWidth, bodyFontSize, bodyLineHeight, maxBodyHeight) : [''];
 
-  return parts.map((body, index) => ({
-    key: `${summary.id}-summary-${index}`,
-    date: key.date,
-    height: estimateSummaryHeight(body, SUMMARY_WIDTH),
-    anchor: key,
-    blocks: [
-      {
-        type: 'summary',
-        source: key,
-        summary_id: summary.id,
-        interval: summary.interval,
-        title: summary.title.trim(),
-        body,
-        range_label: `${summary.range_start.slice(0, 10)} - ${summary.range_end.slice(0, 10)}`,
-        x: B5_MARGIN_X + 120 + ((seed + index) % 90),
-        width: SUMMARY_WIDTH,
-        height: estimateSummaryHeight(body, SUMMARY_WIDTH),
-        rotation: [-1.2, 1.0, -0.8][(seed + index) % 3],
-      },
-    ],
-  }));
+  return parts.map((body, index) => {
+    const bodyLines = Math.max(1, wrapTextLines(body, bodyWidth, bodyFontSize).length);
+    const titleLines = Math.max(1, wrapTextLines(summary.title.trim(), bodyWidth, 34 * DIARY_FONT_SCALE).length);
+    const height = Math.ceil(
+      metrics.paddingY * 2 + metrics.metaLineHeight + Math.round(10 * DIARY_FONT_SCALE) + titleLines * metrics.titleLineHeight + Math.round(10 * DIARY_FONT_SCALE) + bodyLines * bodyLineHeight,
+    );
+
+    return {
+      key: `${summary.id}-summary-${index}`,
+      date: key.date,
+      height,
+      anchor: key,
+      blocks: [
+        {
+          type: 'summary',
+          source: key,
+          summary_id: summary.id,
+          interval: summary.interval,
+          title: summary.title.trim(),
+          body,
+          range_label: `${summary.range_start.slice(0, 10)} - ${summary.range_end.slice(0, 10)}`,
+          x: B5_MARGIN_X,
+          width: FULL_WIDTH,
+          height,
+          rotation: 0,
+        },
+      ],
+    };
+  });
+}
+
+function buildEventRows(item: Extract<DiarySourceItem, { kind: 'event' }>, context: DiaryBookBuildContext): DiaryRow[] {
+  return buildEventRowsDeterministic(item, context);
+}
+
+function buildSummaryRows(item: Extract<DiarySourceItem, { kind: 'summary' }>): DiaryRow[] {
+  return buildSummaryRowsDeterministic(item);
 }
 
 function buildRows(context: DiaryBookBuildContext): DiaryRow[] {

@@ -1,0 +1,573 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Diary Layout Test</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f5efe3;
+        --ink: #2c2016;
+        --paper: rgba(255, 250, 241, 0.98);
+        --paper-edge: rgba(128, 99, 65, 0.18);
+        --accent: #7a5837;
+        --muted: #7c6651;
+        --shadow: 0 24px 44px rgba(84, 61, 32, 0.16);
+      }
+
+      html,
+      body {
+        margin: 0;
+        min-height: 100%;
+        background:
+          radial-gradient(circle at top, rgba(255, 255, 255, 0.78), transparent 40%),
+          linear-gradient(180deg, #f8f0df 0%, #efe1c7 100%);
+        color: var(--ink);
+        font-family: Georgia, 'Times New Roman', serif;
+      }
+
+      body {
+        padding: 24px;
+        box-sizing: border-box;
+      }
+
+      .shell {
+        display: grid;
+        gap: 18px;
+        max-width: 100%;
+      }
+
+      .header {
+        display: grid;
+        gap: 10px;
+        padding: 18px 20px;
+        border-radius: 20px;
+        background: rgba(255, 250, 241, 0.8);
+        box-shadow: var(--shadow);
+        border: 1px solid var(--paper-edge);
+      }
+
+      .header h1 {
+        margin: 0;
+        font-size: 28px;
+        line-height: 1.1;
+      }
+
+      .header p {
+        margin: 0;
+        color: var(--muted);
+      }
+
+      .status {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        font-size: 14px;
+        color: var(--muted);
+      }
+
+      .status strong {
+        color: var(--ink);
+      }
+
+      .issues {
+        display: grid;
+        gap: 6px;
+        color: #8d3c25;
+        font-size: 14px;
+      }
+
+      .pages {
+        display: grid;
+        gap: 28px;
+      }
+
+      .page {
+        position: relative;
+        margin: 0 auto;
+        background: var(--paper);
+        border: 1px solid var(--paper-edge);
+        box-shadow: var(--shadow);
+        overflow: hidden;
+        border-radius: 30px;
+      }
+
+      .page::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.56), rgba(255, 255, 255, 0.06)),
+          repeating-linear-gradient(180deg, transparent, transparent 28px, rgba(123, 96, 66, 0.06) 28px, rgba(123, 96, 66, 0.06) 29px);
+      }
+
+      .block {
+        position: absolute;
+        box-sizing: border-box;
+        overflow: hidden;
+        border-radius: 18px;
+        background: rgba(255, 255, 255, 0.7);
+      }
+
+      .block[data-type='date'] {
+        padding: 0 12px;
+        background: transparent;
+        box-shadow: none;
+        color: #6e5034;
+        font-size: 48px;
+        line-height: 1.05;
+      }
+
+      .block[data-type='event_text'],
+      .block[data-type='summary'] {
+        padding: 24px 28px;
+        box-shadow: 0 14px 24px rgba(82, 59, 29, 0.08);
+        border: 1px solid rgba(128, 99, 65, 0.1);
+      }
+
+      .block[data-type='event_image'] {
+        padding: 12px;
+        box-shadow: 0 16px 28px rgba(82, 59, 29, 0.1);
+        border: 1px solid rgba(128, 99, 65, 0.1);
+        background: rgba(255, 255, 255, 0.86);
+      }
+
+      .block[data-type='comment_group'] {
+        padding: 16px;
+        background: transparent;
+      }
+
+      .event-heading,
+      .summary-heading,
+      .comment-meta {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
+        align-items: baseline;
+        color: var(--muted);
+        margin: 0 0 10px;
+        font-size: 14px;
+      }
+
+      .event-title,
+      .summary-title {
+        margin: 0 0 12px;
+        color: var(--ink);
+        line-height: 1.2;
+        font-size: 28px;
+      }
+
+      .event-body,
+      .summary-body,
+      .comment-body {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        margin: 0;
+        line-height: 1.75;
+        font-size: 18px;
+      }
+
+      .assets {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 14px;
+      }
+
+      .asset-chip {
+        display: inline-flex;
+        align-items: center;
+        padding: 6px 10px;
+        border-radius: 999px;
+        background: rgba(210, 190, 154, 0.22);
+        color: #5d4329;
+        font-size: 12px;
+      }
+
+      .image-frame {
+        width: 100%;
+        height: 100%;
+        display: grid;
+        place-items: center;
+        border-radius: 14px;
+        background: rgba(245, 237, 221, 0.8);
+        overflow: hidden;
+      }
+
+      .image-frame img {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        display: block;
+      }
+
+      .comment-list {
+        display: grid;
+        gap: 12px;
+      }
+
+      .comment-card {
+        padding: 14px 16px;
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.85);
+        border: 1px solid rgba(128, 99, 65, 0.12);
+        box-shadow: 0 10px 16px rgba(82, 59, 29, 0.06);
+      }
+
+      .comment-meta {
+        margin-bottom: 8px;
+        font-size: 13px;
+      }
+
+      .note {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .pass {
+        color: #2d6a3a;
+      }
+
+      .fail {
+        color: #8d3c25;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <header class="header">
+        <h1>Diary Layout Engine Test</h1>
+        <p>Self-contained fixture for long text, odd aspect images, many comments, and very long comments.</p>
+        <div id="status" class="status"></div>
+        <div id="issues" class="issues"></div>
+      </header>
+      <main id="pages" class="pages"></main>
+    </div>
+
+    <script type="module">
+      import { buildDiaryBook } from '/src/lib/diary-book.ts';
+
+      const friendMap = new Map([
+        ['alice', 'Alice'],
+        ['bob', 'Bob'],
+        ['carol', 'Carol'],
+        ['dave', 'Dave'],
+        ['eve', 'Eve'],
+      ]);
+
+      function formatDateTime(value) {
+        if (!value) {
+          return '';
+        }
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) {
+          return String(value).slice(0, 16);
+        }
+        return date.toISOString().replace('T', ' ').slice(0, 16);
+      }
+
+      function friendName(sender) {
+        return friendMap.get(sender) ?? sender;
+      }
+
+      function repeatSentence(sentence, count) {
+        return Array.from({ length: count }, () => sentence).join(' ');
+      }
+
+      function makeSvg(width, height, title, colorA, colorB) {
+        const svg = `
+          <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+            <defs>
+              <linearGradient id="g" x1="0" x2="1" y1="0" y2="1">
+                <stop offset="0%" stop-color="${colorA}" />
+                <stop offset="100%" stop-color="${colorB}" />
+              </linearGradient>
+            </defs>
+            <rect width="100%" height="100%" fill="url(#g)" />
+            <circle cx="${Math.round(width * 0.22)}" cy="${Math.round(height * 0.28)}" r="${Math.round(Math.min(width, height) * 0.13)}" fill="rgba(255,255,255,0.22)" />
+            <circle cx="${Math.round(width * 0.76)}" cy="${Math.round(height * 0.7)}" r="${Math.round(Math.min(width, height) * 0.18)}" fill="rgba(255,255,255,0.16)" />
+            <text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" font-family="Georgia, serif" font-size="${Math.max(18, Math.round(Math.min(width, height) * 0.12))}" fill="rgba(255,255,255,0.92)">${title}</text>
+          </svg>`;
+        return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+      }
+
+      const longText = `${repeatSentence('A long note with layered detail about a normal day that keeps going and keeps changing shape.', 18)}\n\n${repeatSentence('第二段用中文和 English 混合，专门测试换行、超长段落、以及任意长度文字的分页稳定性。', 16)}\n\n${repeatSentence('Final paragraph: the block should keep its box, split cleanly, and never overflow the page even when the content is much longer than the available sheet height.', 14)}`;
+
+      const veryLongComment = repeatSentence('This comment is intentionally long so the engine has to wrap it across many lines while keeping the card box stable and the page break logic deterministic.', 12);
+      const manyComments = Array.from({ length: 26 }, (_, index) => ({
+        id: `mc-${index}`,
+        sender: index % 2 === 0 ? 'alice' : 'bob',
+        time: `2026-04-0${(index % 6) + 1}T08:${String(index).padStart(2, '0')}:00.000Z`,
+        content: `Comment ${index + 1}: ${repeatSentence('A short but non-trivial remark that should stack without collision.', 3)}`,
+      }));
+
+      const longCommentSet = Array.from({ length: 4 }, (_, index) => ({
+        id: `lc-${index}`,
+        sender: index % 2 === 0 ? 'carol' : 'dave',
+        time: `2026-04-03T1${index}:15:00.000Z`,
+        content: `${veryLongComment}\n\n${repeatSentence('Extra paragraph to force more wrapping inside a single comment card.', 8)}`,
+      }));
+
+      const events = [
+        {
+          id: 'evt-long-text-image-comments',
+          created_at: '2026-04-01T08:30:00.000Z',
+          time: '2026-04-01T08:30:00.000Z',
+          title: 'Long text with odd images',
+          raw: longText,
+          is_task: false,
+          task_status: null,
+          tags: [],
+          assets: [
+            {
+              id: 'img-wide',
+              filepath: 'wide.svg',
+              display_path: makeSvg(3000, 360, '3000 × 360', '#3f6fb6', '#86b7f2'),
+              filename: 'wide.svg',
+              type: 'image',
+              upload_order: 1,
+              width: 3000,
+              height: 360,
+            },
+            {
+              id: 'img-tall',
+              filepath: 'tall.svg',
+              display_path: makeSvg(320, 2400, '320 × 2400', '#a24c39', '#f0ab82'),
+              filename: 'tall.svg',
+              type: 'image',
+              upload_order: 2,
+              width: 320,
+              height: 2400,
+            },
+          ],
+          comments: [
+            {
+              id: 'c-1',
+              sender: 'alice',
+              time: '2026-04-01T10:00:00.000Z',
+              content: 'A single closing comment to verify ordering after media.',
+            },
+          ],
+        },
+        {
+          id: 'evt-many-comments',
+          created_at: '2026-04-02T09:00:00.000Z',
+          time: '2026-04-02T09:00:00.000Z',
+          title: 'Many comments',
+          raw: 'Short content, mostly used to stress comment grouping and page continuation.',
+          is_task: false,
+          task_status: null,
+          tags: [],
+          assets: [],
+          comments: manyComments,
+        },
+        {
+          id: 'evt-long-comments',
+          created_at: '2026-04-03T11:00:00.000Z',
+          time: '2026-04-03T11:00:00.000Z',
+          title: 'Very long comments',
+          raw: 'This entry checks that comment cards can themselves become tall and still be split safely over pages.',
+          is_task: false,
+          task_status: null,
+          tags: [],
+          assets: [
+            {
+              id: 'img-square',
+              filepath: 'square.svg',
+              display_path: makeSvg(1200, 1200, '1200 × 1200', '#51796b', '#8fc2a8'),
+              filename: 'square.svg',
+              type: 'image',
+              upload_order: 1,
+              width: 1200,
+              height: 1200,
+            },
+          ],
+          comments: longCommentSet,
+        },
+        {
+          id: 'evt-empty-title-only',
+          created_at: '2026-04-04T12:00:00.000Z',
+          time: '2026-04-04T12:00:00.000Z',
+          title: 'Title only event',
+          raw: '',
+          is_task: false,
+          task_status: null,
+          tags: [],
+          assets: [],
+          comments: [],
+        },
+      ];
+
+      const summaries = [
+        {
+          id: 'sum-1',
+          created_at: '2026-04-04T18:00:00.000Z',
+          interval: '7d',
+          range_start: '2026-03-29T00:00:00.000Z',
+          range_end: '2026-04-04T23:59:59.000Z',
+          tasks: {
+            finished: 12,
+            failed: 1,
+            rest: 7,
+            rate: 0.75,
+            summary: repeatSentence('Task summary text that needs room.', 12),
+          },
+          mood: {
+            event_track: [],
+            daily_totals: [],
+            monthly_averages: [],
+            total: 37,
+            summary: repeatSentence('Mood summary text with lots of detail for wrapping and pagination.', 14),
+          },
+          summary: repeatSentence('A free-form summary paragraph that also needs to wrap and stay within the page box.', 14),
+          title: 'Weekly recap with a long title that should wrap cleanly across lines',
+          mail_id: 'mail-1',
+        },
+      ];
+
+      const book = buildDiaryBook({
+        paperSize: 'B5',
+        fontScale: 1,
+        events,
+        summaries,
+        formatDateTime,
+        friendName,
+      });
+
+      const pagesEl = document.getElementById('pages');
+      const statusEl = document.getElementById('status');
+      const issuesEl = document.getElementById('issues');
+      const issues = [];
+
+      function renderBlock(block) {
+        const node = document.createElement('div');
+        node.className = 'block';
+        node.dataset.type = block.type;
+        node.style.left = `${block.x}px`;
+        node.style.top = `${block.y}px`;
+        node.style.width = `${block.width}px`;
+        node.style.height = `${block.height}px`;
+        node.style.transform = `rotate(${block.rotation}deg)`;
+        node.dataset.blockId = block.id;
+
+        if (block.type === 'date') {
+          node.textContent = block.label;
+          return node;
+        }
+
+        if (block.type === 'event_image') {
+          const frame = document.createElement('div');
+          frame.className = 'image-frame';
+          const img = document.createElement('img');
+          img.alt = block.asset.filename || block.asset.id;
+          img.src = block.asset.display_path || block.asset.filepath;
+          frame.appendChild(img);
+          node.appendChild(frame);
+          return node;
+        }
+
+        if (block.type === 'comment_group') {
+          const list = document.createElement('div');
+          list.className = 'comment-list';
+          block.comments.forEach((comment) => {
+            const card = document.createElement('article');
+            card.className = 'comment-card';
+            const meta = document.createElement('div');
+            meta.className = 'comment-meta';
+            meta.innerHTML = `<span>${comment.sender}</span><span>${comment.time_label}</span>`;
+            const body = document.createElement('p');
+            body.className = 'comment-body';
+            body.textContent = comment.content;
+            card.append(meta, body);
+            list.appendChild(card);
+          });
+          node.appendChild(list);
+          return node;
+        }
+
+        if (block.type === 'summary') {
+          const meta = document.createElement('div');
+          meta.className = 'summary-heading';
+          meta.innerHTML = `<span>summary / ${block.interval}</span><span>${block.range_label}</span>`;
+          const title = document.createElement('h2');
+          title.className = 'summary-title';
+          title.textContent = block.title;
+          const body = document.createElement('p');
+          body.className = 'summary-body';
+          body.textContent = block.body;
+          node.append(meta, title, body);
+          return node;
+        }
+
+        const heading = document.createElement('div');
+        heading.className = 'event-heading';
+        heading.innerHTML = `<span>${block.time_label}</span><span>${block.continuation ? 'continued' : 'entry'}</span>`;
+        const title = document.createElement('h2');
+        title.className = 'event-title';
+        title.textContent = block.title || 'Untitled';
+        const body = document.createElement('p');
+        body.className = 'event-body';
+        body.textContent = block.body;
+        node.append(heading, title, body);
+
+        if (block.body_kind === 'title_only') {
+          const note = document.createElement('p');
+          note.className = 'note';
+          note.textContent = 'Title-only card rendered safely.';
+          node.appendChild(note);
+        }
+
+        if (block.other_assets.length) {
+          const assets = document.createElement('div');
+          assets.className = 'assets';
+          block.other_assets.forEach((asset) => {
+            const chip = document.createElement('span');
+            chip.className = 'asset-chip';
+            chip.textContent = `${asset.type} / ${asset.label}`;
+            assets.appendChild(chip);
+          });
+          node.appendChild(assets);
+        }
+
+        return node;
+      }
+
+      book.pages.forEach((page) => {
+        const pageEl = document.createElement('section');
+        pageEl.className = 'page';
+        pageEl.style.width = `${book.page_width}px`;
+        pageEl.style.height = `${book.page_height}px`;
+        pageEl.dataset.pageNumber = String(page.page_number);
+
+        page.blocks.forEach((block) => {
+          const x2 = block.x + block.width;
+          const y2 = block.y + block.height;
+          if (block.x < 0 || block.y < 0 || x2 > book.page_width || y2 > book.page_height) {
+            issues.push(`Page ${page.page_number}: ${block.type} overflows bounds (${Math.round(block.x)}, ${Math.round(block.y)}, ${Math.round(x2)}, ${Math.round(y2)})`);
+          }
+          pageEl.appendChild(renderBlock(block));
+        });
+
+        pagesEl.appendChild(pageEl);
+      });
+
+      statusEl.innerHTML = `
+        <span><strong>${book.pages.length}</strong> pages</span>
+        <span><strong>${events.length}</strong> events</span>
+        <span><strong>${summaries.length}</strong> summaries</span>
+        <span class="${issues.length ? 'fail' : 'pass'}"><strong>${issues.length}</strong> overflow issues</span>
+      `;
+
+      if (issues.length) {
+        issuesEl.innerHTML = issues.map((issue) => `<div>${issue}</div>`).join('');
+      } else {
+        issuesEl.innerHTML = '<div class="pass">No block overflows detected.</div>';
+      }
+
+      window.__diaryLayoutTest = { book, issues };
+    </script>
+  </body>
+</html>

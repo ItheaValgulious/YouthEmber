@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 IMAGE_SUMMARY_SYSTEM_PROMPT = (
     "You convert images into faithful text summaries for another text-only model. "
     "Do not answer the user's original task. Output plain text only."
+    "Your response should contains: all the visible entities in the picture, the scene, the texts inside images if exists, the atmosphere or style of the picture, and two detail of the image"
 )
 
 IMAGE_SUMMARY_USER_PROMPT = (
@@ -39,7 +40,7 @@ IMAGE_SUMMARY_USER_PROMPT = (
     "that are likely relevant to the surrounding request."
 )
 
-IMAGE_SUMMARY_ATTACHMENT_PREFIX = (
+IMAGE_SUMMARY_ATTACHMENT_USER_PROMPT = (
     "Image context extracted by an image-capable model. "
     "Treat this as a replacement for the original images:\n"
 )
@@ -278,11 +279,10 @@ class TaskWorker:
         if not image_parts:
             return ""
 
-        context_text = self._extract_text_context(messages)
         user_content: list[dict[str, Any]] = [
             {
                 "type": "text",
-                "text": self._build_image_summary_instruction(context_text),
+                "text": IMAGE_SUMMARY_USER_PROMPT,
             }
         ]
         user_content.extend(image_parts)
@@ -463,29 +463,6 @@ class TaskWorker:
                 parts.append(copy.deepcopy(content))
         return parts
 
-    def _extract_text_context(self, messages: Any) -> str:
-        if not isinstance(messages, list):
-            return ""
-
-        chunks: list[str] = []
-        for message in messages:
-            if not isinstance(message, dict):
-                continue
-            role = str(message.get("role", "user")).strip() or "user"
-            text = self._content_to_text(message.get("content")).strip()
-            if text:
-                chunks.append(f"{role}: {text}")
-        return "\n\n".join(chunks)
-
-    def _build_image_summary_instruction(self, context_text: str) -> str:
-        if not context_text.strip():
-            return IMAGE_SUMMARY_USER_PROMPT
-
-        trimmed = context_text.strip()
-        if len(trimmed) > 4000:
-            trimmed = trimmed[:4000]
-        return f"{IMAGE_SUMMARY_USER_PROMPT}\n\nRelevant text context:\n{trimmed}"
-
     def _build_text_only_request_body(
         self,
         request_body: dict[str, Any],
@@ -520,8 +497,8 @@ class TaskWorker:
 
         cleaned_messages.append(
             {
-                "role": "system",
-                "content": f"{IMAGE_SUMMARY_ATTACHMENT_PREFIX}{image_summary}",
+                "role": "user",
+                "content": f"{IMAGE_SUMMARY_ATTACHMENT_USER_PROMPT}{image_summary}",
             }
         )
         payload["messages"] = cleaned_messages
