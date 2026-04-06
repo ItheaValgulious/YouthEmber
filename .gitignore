@@ -14,3 +14,5 @@ server/data/*.sqlite
 server/data/*.sqlite3
 server/data/__pycache__/
 server/app/__pycache__/
+**/.env/
+**/*.swp
