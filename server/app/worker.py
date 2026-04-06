@@ -107,10 +107,15 @@ class TaskWorker:
         task_id = str(task["id"])
         retry_count = int(task.get("retry_count") or 0)
         retry_delays = self.settings.worker_retry_delays_seconds
+        final_request_body: dict[str, Any] | None = None
+        used_image_fallback_rewrite = False
 
         try:
             model_row = get_model_for_task(self.settings, str(task["model_id"]))
             request_body = json.loads(str(task["request_body"]))
+            used_image_fallback_rewrite = self._request_has_images(request_body) and not bool(
+                model_row.get("dealing_img")
+            )
             final_request_body = self._prepare_request_body_for_model(request_body, model_row)
             response_text, usage = self._call_upstream(model_row, final_request_body)
             mark_task_succeeded(
@@ -124,17 +129,23 @@ class TaskWorker:
             return
         except AppError as exc:
             logger.warning("Task %s failed with app error %s.", task_id, exc.error_code)
+            failure_context: dict[str, Any] = {
+                "source": "worker",
+                "failure_type": "app_error",
+                "exception_type": type(exc).__name__,
+            }
+            self._attach_final_request_body_to_failure_context(
+                failure_context,
+                used_image_fallback_rewrite=used_image_fallback_rewrite,
+                final_request_body=final_request_body,
+            )
             mark_task_failed(
                 self.settings,
                 task_id=task_id,
                 retry_count=retry_count,
                 error_code=exc.error_code,
                 error_message=exc.message,
-                context={
-                    "source": "worker",
-                    "failure_type": "app_error",
-                    "exception_type": type(exc).__name__,
-                },
+                context=failure_context,
             )
             return
         except UpstreamFailure as exc:
@@ -159,18 +170,24 @@ class TaskWorker:
                 )
                 return
 
+            failure_context = {
+                "source": "worker",
+                "failure_type": "upstream_failure",
+                "exception_type": type(exc).__name__,
+                "retryable": exc.retryable,
+            }
+            self._attach_final_request_body_to_failure_context(
+                failure_context,
+                used_image_fallback_rewrite=used_image_fallback_rewrite,
+                final_request_body=final_request_body,
+            )
             mark_task_failed(
                 self.settings,
                 task_id=task_id,
                 retry_count=retry_count,
                 error_code=exc.error_code,
                 error_message=exc.message,
-                context={
-                    "source": "worker",
-                    "failure_type": "upstream_failure",
-                    "exception_type": type(exc).__name__,
-                    "retryable": exc.retryable,
-                },
+                context=failure_context,
             )
             return
         except Exception as exc:
@@ -194,20 +211,39 @@ class TaskWorker:
                 )
                 return
 
+            failure_context = {
+                "source": "worker",
+                "failure_type": "worker_internal_error",
+                "exception_type": type(exc).__name__,
+                "traceback": traceback.format_exc(),
+            }
+            self._attach_final_request_body_to_failure_context(
+                failure_context,
+                used_image_fallback_rewrite=used_image_fallback_rewrite,
+                final_request_body=final_request_body,
+            )
             mark_task_failed(
                 self.settings,
                 task_id=task_id,
                 retry_count=retry_count,
                 error_code=failure.error_code,
                 error_message=failure.message,
-                context={
-                    "source": "worker",
-                    "failure_type": "worker_internal_error",
-                    "exception_type": type(exc).__name__,
-                    "traceback": traceback.format_exc(),
-                },
+                context=failure_context,
             )
             return
+
+    def _attach_final_request_body_to_failure_context(
+        self,
+        context: dict[str, Any],
+        *,
+        used_image_fallback_rewrite: bool,
+        final_request_body: dict[str, Any] | None,
+    ) -> None:
+        if not used_image_fallback_rewrite:
+            return
+        if not isinstance(final_request_body, dict):
+            return
+        context["final_request_body"] = copy.deepcopy(final_request_body)
 
     def _prepare_request_body_for_model(
         self,
