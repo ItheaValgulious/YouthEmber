@@ -16,3 +16,4 @@ server/data/__pycache__/
 server/app/__pycache__/
 **/.env/
 **/*.swp
+.claude

@@ -1261,6 +1261,11 @@ function queueFriendJobs(
     return;
   }
 
+  const senderIsAiFriend =
+    trigger.kind === 'comment' &&
+    typeof trigger.sender === 'string' &&
+    state.friends.some((friend) => friend.id === trigger.sender);
+
   state.friends
     .filter((friend) => friend.enabled)
     .forEach((friend) => {
@@ -1268,7 +1273,8 @@ function queueFriendJobs(
         return;
       }
 
-      const probability = clamp(friend.active, 0, 1);
+      const probabilityBase = senderIsAiFriend ? friend.ai_active : friend.active;
+      const probability = clamp(probabilityBase, 0, 1);
       if (Math.random() > probability) {
         return;
       }

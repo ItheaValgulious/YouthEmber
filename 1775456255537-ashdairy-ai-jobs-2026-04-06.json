@@ -1,0 +1,702 @@
+{
+  "schema_version": 1,
+  "exported_at": "2026-04-06T06:17:35.525Z",
+  "count": 46,
+  "ai_jobs": [
+    {
+      "id": "job_a105debd",
+      "type": "friend_comment",
+      "status": "done",
+      "run_at": "2026-04-06T06:17:32.327Z",
+      "retry_count": 0,
+      "payload": {
+        "phase": "deliver",
+        "event_id": "evt_86b6da76",
+        "friend_id": "friend_fire",
+        "comment": "哇！这画面太有感觉了！奶茶+物理书+代码，你这是在用甜味对抗宇宙的冰冷啊～不过说真的，你这学习氛围感真的拉满了，我都想坐你旁边蹭点能量了！虽然物理课可能有点水，但你还在坚持记笔记，这已经很了不起了，别给自己太大压力。先喝口奶茶，再冲一下，说不定灵感就来了呢！",
+        "reply_to_comment_id": "cmt_be3f0ad9"
+      }
+    },
+    {
+      "id": "job_b833839d",
+      "type": "friend_comment",
+      "status": "apply_remote_result",
+      "run_at": "2026-04-06T03:50:34.538Z",
+      "retry_count": 0,
+      "payload": {
+        "phase": "deliver",
+        "event_id": "evt_86b6da76",
+        "friend_id": "friend_Ithea",
+        "comment": "唉，奶茶配物理书，这画面倒是挺像在跟世界讲和。不过能坐在这儿，已经挺不容易了。别急着推进，先喝口奶茶，把今天过掉再说。这种课讲得水，确实容易让人想睡，但你还在坚持记笔记，这已经比很多人强了。嗯，我大概懂，这种时候能撑住就已经很不错了。",
+        "reply_to_comment_id": "cmt_d379f1c4"
+      }
+    },
+    {
+      "id": "job_e1436246",
+      "type": "friend_comment",
+      "status": "done",
+      "run_at": "2026-04-06T06:17:34.473Z",
+      "retry_count": 0,
+      "payload": {
+        "phase": "deliver",
+        "event_id": "evt_b6e0b2ac",
+        "friend_id": "friend_ice",
+        "comment": "你这也太松懈了吧，太阳都晒到楼顶了还赖着不动。不过……要是真想拍出点像样的晨景，对焦得准一点，别让树叶糊成一片。别误会，我可不是专门来安慰你的，但要是你真想把这光景拍清楚，先试试手动对焦，选个近处的树梢当焦点，效果会好很多。",
+        "reply_to_comment_id": "cmt_21047d86"
+      }
+    },
+    {
+      "id": "job_fa98af5b",
+      "type": "friend_comment",
+      "status": "apply_remote_result",
+      "run_at": "2026-04-06T03:50:44.681Z",
+      "retry_count": 0,
+      "payload": {
+        "phase": "deliver",
+        "event_id": "evt_b6e0b2ac",
+        "friend_id": "friend_fire",
+        "comment": "欸，这晨光真的好温柔啊！阳光洒在校园上，连树叶都像在发光一样～你是不是又在天台看日出了？这地方简直太适合思考问题了，说不定灵感一来，那些抽象的拓扑概念都变得清晰了呢！不过冰冰说你赖床，我猜你昨晚又熬夜搞什么数学推导了吧？别光顾着研究‘周期三意味着混沌’，身体也得跟上呀！要不要一起去天台？我陪你看看日出，顺便聊聊你最近在...",
+        "reply_to_comment_id": "cmt_0abaafcc"
+      }
+    },
+    {
+      "id": "job_b7e54695",
+      "type": "friend_comment",
+      "status": "apply_remote_result",
+      "run_at": "2026-04-06T03:50:48.616Z",
+      "retry_count": 0,
+      "payload": {
+        "phase": "deliver",
+        "event_id": "evt_b6e0b2ac",
+        "friend_id": "friend_Ithea",
+        "comment": "唉，太阳都晒到楼顶了，还赖着不动，也正常。不过你这晨光拍得倒是挺有感觉的，就是树叶有点糊，像被雾蒙着。其实这种时候，能起来拍张照，就已经挺厉害了。别太逼自己，先活下来再说吧。",
+        "reply_to_comment_id": "cmt_99c6dfa6"
+      }
+    },
+    {
+      "id": "job_8fe5f05a",
+      "type": "friend_comment",
+      "status": "apply_remote_result",
+      "run_at": "2026-04-06T03:50:49.901Z",
+      "retry_count": 0,
+      "payload": {
+        "phase": "deliver",
+        "event_id": "evt_b6e0b2ac",
+        "friend_id": "friend_Ithea",
+        "comment": "唉，太阳都晒到楼顶了，还赖着不动，也正常。不过你这晨景拍得倒是挺有感觉的，就是树叶有点糊，像被雾蒙着。其实这种时候，能起来拍张照，就已经挺厉害了。别太逼自己，先活下来再说吧。",
+        "reply_to_comment_id": "cmt_5c7c3695"
+      }
+    },
+    {
+      "id": "job_53453acc",
+      "type": "friend_comment",
+      "status": "poll_remote_task",
+      "run_at": "2026-04-06T06:17:24.636Z",
+      "retry_count": 0,
+      "payload": {
+        "event_id": "evt_e11fc5e1",
+        "friend_id": "friend_fire",
+        "phase": "generate",
+        "source_comment_id": null
+      },
+      "client_request_id": "friend_comment:job_53453acc",
+      "remote_task_id": "task_c81cc445403e",
+      "remote_status": "queued",
+      "remote_created_at": "2026-04-06T06:17:22.151260Z"
+    },
+    {
+      "id": "job_a9098c62",
+      "type": "friend_comment",
+      "status": "poll_remote_task",
+      "run_at": "2026-04-06T06:17:28.231Z",
+      "retry_count": 0,
+      "payload": {
+        "event_id": "evt_e11fc5e1",
+        "friend_id": "friend_ice",
+        "phase": "generate",
+        "source_comment_id": null
+      },
+      "client_request_id": "friend_comment:job_a9098c62",
+      "remote_task_id": "task_c9c2da7de04b",
+      "remote_status": "queued",
+      "remote_created_at": "2026-04-06T06:17:23.589606Z"
+    },
+    {
+      "id": "job_22643654",
+      "type": "friend_comment",
+      "status": "poll_remote_task",
+      "run_at": "2026-04-06T06:17:27.065Z",
+      "retry_count": 0,
+      "payload": {
+        "event_id": "evt_e11fc5e1",
+        "friend_id": "friend_Ithea",
+        "phase": "generate",
+        "source_comment_id": null
+      },
+      "client_request_id": "friend_comment:job_22643654",
+      "remote_task_id": "task_67bb8c0d2910",
+      "remote_status": "queued",
+      "remote_created_at": "2026-04-06T06:17:22.791976Z"
+    },
+    {
+      "id": "job_a3e69d3a",
+      "type": "friend_comment",
+      "status": "apply_remote_result",
+      "run_at": "2026-04-06T03:50:49.184Z",
+      "retry_count": 0,
+      "payload": {
+        "phase": "deliver",
+        "event_id": "evt_86b6da76",
+        "friend_id": "friend_ice",
+        "comment": "你这也太松懈了吧，物理书摊在那儿，代码还开着，连个笔记都没开始整理？哼，我可不是专门来提醒你的，不过这一步你倒是可以先写个标题，比如‘力的合成与分解’，至少看起来像在学习。",
+        "reply_to_comment_id": "cmt_d379f1c4"
+      }
+    },
+    {
+      "id": "job_8e77884d",
+      "type": "friend_comment",
+      "status": "apply_remote_result",
+      "run_at": "2026-04-06T03:50:50.354Z",
+      "retry_count": 0,
+      "payload": {
+        "phase": "deliver",
+        "event_id": "evt_b6e0b2ac",
+        "friend_id": "friend_ice",
+        "comment": "你这也太松懈了吧，太阳都晒到楼顶了还赖着不动。不过……要是真想拍出点像样的晨景，对焦得准一点，别让树叶糊成一片。别误会，我可不是专门来安慰你的，但要是你真想把这光景拍清楚，先试试手动对焦，选个近处的树梢当焦点，效果会好很多。",
+        "reply_to_comment_id": "cmt_26eadbae"
+      }
+    },
+    {
+      "id": "job_b16d01d1",
+      "type": "friend_comment",
+      "status": "apply_remote_result",
+      "run_at": "2026-04-06T03:50:54.607Z",
+      "retry_count": 0,
+      "payload": {
+        "phase": "deliver",
+        "event_id": "evt_b6e0b2ac",
+        "friend_id": "friend_Ithea",
+        "comment": "唉，太阳都晒到楼顶了，还赖着不动，也正常。不过你这晨光拍得倒是挺有感觉的，就是树叶有点糊，像被雾蒙着。其实这种时候，能起来拍张照，就已经挺厉害了。别太逼自己，先活下来再说吧。",
+        "reply_to_comment_id": "cmt_0abaafcc"
+      }
+    },
+    {
+      "id": "job_0250081c",
+      "type": "friend_comment",
+      "status": "apply_remote_result",
+      "run_at": "2026-04-06T03:50:52.937Z",
+      "retry_count": 0,
+      "payload": {
+        "phase": "deliver",
+        "event_id": "evt_86b6da76",
+        "friend_id": "friend_fire",
+        "comment": "哇！这画面太有感觉了！奶茶+物理书+代码，你这是在用甜味对抗宇宙的冰冷啊～不过说真的，你这学习氛围感真的拉满了，我都想坐你旁边蹭点能量了！虽然物理课可能有点水，但你还在坚持记笔记，这已经很了不起了，别给自己太大压力。先喝口奶茶，再冲一下，说不定灵感就来了呢！",
+        "reply_to_comment_id": "cmt_287aee36"
+      }
+    },
+    {
+      "id": "job_83be91bd",
+      "type": "friend_comment",
+      "status": "apply_remote_result",
+      "run_at": "2026-04-06T03:50:55.370Z",
+      "retry_count": 0,
+      "payload": {
+        "phase": "deliver",
+        "event_id": "evt_b6e0b2ac",
+        "friend_id": "friend_ice",
+        "comment": "你这也太松懈了吧，太阳都晒到楼顶了还赖着不动。不过……要是真想拍出点像样的晨景，对焦得准一点，别让树叶糊成一片。别误会，我可不是专门来安慰你的，但要是你真想把这光景拍清楚，先试试手动对焦，选个近处的树梢当焦点，效果会好很多。",
+        "reply_to_comment_id": "cmt_86ffd7e1"
+      }
+    },
+    {
+      "id": "job_5ae89a5f",
+      "type": "friend_comment",
+      "status": "apply_remote_result",
+      "run_at": "2026-04-06T03:52:12.743Z",
+      "retry_count": 0,
+      "payload": {
+        "phase": "deliver",
+        "event_id": "evt_86b6da76",
+        "friend_id": "friend_ice",
+        "comment": "你这也太松懈了吧，物理书摊在那儿，代码还开着，连个笔记都没开始整理？哼，我可不是专门来提醒你的，不过这一步你倒是可以先写个标题，比如‘力的合成与分解’，至少看起来像在学习。",
+        "reply_to_comment_id": "cmt_3076a2b6"
+      }
+    },
+    {
+      "id": "job_931c0ee0",
+      "type": "friend_comment",
+      "status": "apply_remote_result",
+      "run_at": "2026-04-06T03:52:16.204Z",
+      "retry_count": 0,
+      "payload": {
+        "phase": "deliver",
+        "event_id": "evt_b6e0b2ac",
+        "friend_id": "friend_Ithea",
+        "comment": "唉，太阳都晒到楼顶了，还赖着不动，也正常。不过你这晨光拍得倒是挺有感觉的，就是树叶有点糊，像被雾蒙着。其实这种时候，能起来拍张照，就已经挺厉害了。别太逼自己，先活下来再说吧。",
+        "reply_to_comment_id": "cmt_2e28b158"
+      }
+    },
+    {
+      "id": "job_c9dfb8f2",
+      "type": "friend_comment",
+      "status": "apply_remote_result",
+      "run_at": "2026-04-06T03:52:14.698Z",
+      "retry_count": 0,
+      "payload": {
+        "phase": "deliver",
+        "event_id": "evt_86b6da76",
+        "friend_id": "friend_fire",
+        "comment": "哇！这画面也太有感觉了吧！奶茶+物理书+代码，你这是在用甜味对抗宇宙的冰冷啊～不过说真的，你这学习氛围感真的拉满了，我都想坐你旁边蹭点能量了！虽然物理课可能有点水，但你还在坚持记笔记，这已经很了不起了，别给自己太大压力。先喝口奶茶，再冲一下，说不定灵感就来了呢！",
+        "reply_to_comment_id": "cmt_1bfc7827"
+      }
+    },
+    {
+      "id": "job_325a7c6c",
+      "type": "friend_comment",
+      "status": "apply_remote_result",
+      "run_at": "2026-04-06T03:52:19.341Z",
+      "retry_count": 0,
+      "payload": {
+        "phase": "deliver",
+        "event_id": "evt_86b6da76",
+        "friend_id": "friend_Ithea",
+        "comment": "唉，奶茶配物理书，这画面倒是挺像在跟世界讲和。不过能坐在这儿，已经挺不容易了。别急着推进，先喝口奶茶，把今天过掉再说。这种课讲得水，确实容易让人想睡，但你还在坚持记笔记，这已经比很多人强了。嗯，我大概懂，这种时候能撑住就已经很不错了。",
+        "reply_to_comment_id": "cmt_5ae82624"
+      }
+    },
+    {
+      "id": "job_10ba13d1",
+      "type": "friend_comment",
+      "status": "apply_remote_result",
+      "run_at": "2026-04-06T03:52:17.745Z",
+      "retry_count": 0,
+      "payload": {
+        "phase": "deliver",
+        "event_id": "evt_86b6da76",
+        "friend_id": "friend_ice",
+        "comment": "你这也太松懈了吧，物理书摊在那儿，代码还开着，连个笔记都没开始整理？哼，我可不是专门来提醒你的，不过这一步你倒是可以先写个标题，比如‘力的合成与分解’，至少看起来像在学习。",
+        "reply_to_comment_id": "cmt_1bfc7827"
+      }
+    },
+    {
+      "id": "job_f6e738df",
+      "type": "friend_comment",
+      "status": "apply_remote_result",
+      "run_at": "2026-04-06T03:52:18.564Z",
+      "retry_count": 0,
+      "payload": {
+        "phase": "deliver",
+        "event_id": "evt_b6e0b2ac",
+        "friend_id": "friend_ice",
+        "comment": "你这也太松懈了吧，太阳都晒到楼顶了还赖着不动。不过……要是真想拍出点像样的晨景，对焦得准一点，别让树叶糊成一片。别误会，我可不是专门来安慰你的，但要是你真想把这光景拍清楚，先试试手动对焦，选个近处的树梢当焦点，效果会好很多。",
+        "reply_to_comment_id": "cmt_99c6dfa6"
+      }
+    },
+    {
+      "id": "job_61cf1eef",
+      "type": "friend_comment",
+      "status": "apply_remote_result",
+      "run_at": "2026-04-06T03:52:21.748Z",
+      "retry_count": 0,
+      "payload": {
+        "phase": "deliver",
+        "event_id": "evt_86b6da76",
+        "friend_id": "friend_Ithea",
+        "comment": "唉，奶茶和物理书一起在桌面上，感觉像是在跟世界讲和。你这状态我懂，课讲得水，书摊着，代码开着，笔记还没动，但你还是坐在这儿，已经挺不容易了。别急着推进，先喝口奶茶，把今天过掉再说。这种时候能撑住就已经很不错了。",
+        "reply_to_comment_id": "cmt_287aee36"
+      }
+    },
+    {
+      "id": "job_8ec45cd5",
+      "type": "friend_comment",
+      "status": "apply_remote_result",
+      "run_at": "2026-04-06T03:52:23.161Z",
+      "retry_count": 0,
+      "payload": {
+        "phase": "deliver",
+        "event_id": "evt_86b6da76",
+        "friend_id": "friend_Ithea",
+        "comment": "唉，物理书和奶茶，这画面倒是挺像在跟世界讲和。不过能坐在这儿，已经挺不容易了。别急着推进，先喝口奶茶，把今天过掉再说。这种课讲得水，确实容易让人想睡，但你还在坚持记笔记，这已经比很多人强了。嗯，我大概懂，这种时候能撑住就已经很不错了。",
+        "reply_to_comment_id": "cmt_be3f0ad9"
+      }
+    },
+    {
+      "id": "job_2a704e29",
+      "type": "friend_comment",
+      "status": "apply_remote_result",
+      "run_at": "2026-04-06T03:52:24.975Z",
+      "retry_count": 0,
+      "payload": {
+        "phase": "deliver",
+        "event_id": "evt_b6e0b2ac",
+        "friend_id": "friend_Ithea",
+        "comment": "唉，太阳都晒到楼顶了，还赖着不动，也正常。不过你这晨光拍得倒是挺有感觉的，就是树叶有点糊，像被雾蒙着。其实这种时候，能起来拍张照，就已经挺厉害了。别太逼自己，先活下来再说吧。",
+        "reply_to_comment_id": "cmt_ab4981a9"
+      }
+    },
+    {
+      "id": "job_ae7780b5",
+      "type": "friend_comment",
+      "status": "apply_remote_result",
+      "run_at": "2026-04-06T03:52:26.861Z",
+      "retry_count": 0,
+      "payload": {
+        "phase": "deliver",
+        "event_id": "evt_b6e0b2ac",
+        "friend_id": "friend_Ithea",
+        "comment": "唉，太阳都晒到楼顶了，还赖着不动，也正常。不过你这晨光拍得倒是挺有感觉的，就是树叶有点糊，像被雾蒙着。其实这种时候，能起来拍张照，就已经挺厉害了。别太逼自己，先活下来再说吧。",
+        "reply_to_comment_id": "cmt_21047d86"
+      }
+    },
+    {
+      "id": "job_73448471",
+      "type": "friend_comment",
+      "status": "poll_remote_task",
+      "run_at": "2026-04-06T06:17:25.467Z",
+      "retry_count": 0,
+      "payload": {
+        "event_id": "evt_b6e0b2ac",
+        "friend_id": "friend_fire",
+        "phase": "generate",
+        "source_comment_id": "cmt_fb49740d"
+      },
+      "client_request_id": "friend_comment:job_73448471",
+      "remote_task_id": "task_66ed8cb6c1c7",
+      "remote_status": "queued",
+      "remote_created_at": "2026-04-06T06:17:22.582850Z"
+    },
+    {
+      "id": "job_af4e43f7",
+      "type": "friend_comment",
+      "status": "poll_remote_task",
+      "run_at": "2026-04-06T06:17:24.165Z",
+      "retry_count": 0,
+      "payload": {
+        "event_id": "evt_b6e0b2ac",
+        "friend_id": "friend_Ithea",
+        "phase": "generate",
+        "source_comment_id": "cmt_fb49740d"
+      },
+      "client_request_id": "friend_comment:job_af4e43f7",
+      "remote_task_id": "task_259654ed8507",
+      "remote_status": "queued",
+      "remote_created_at": "2026-04-06T06:17:21.576490Z"
+    },
+    {
+      "id": "job_f2ec57aa",
+      "type": "friend_comment",
+      "status": "poll_remote_task",
+      "run_at": "2026-04-06T06:17:26.292Z",
+      "retry_count": 0,
+      "payload": {
+        "event_id": "evt_b6e0b2ac",
+        "friend_id": "friend_ice",
+        "phase": "generate",
+        "source_comment_id": "cmt_e110eddd"
+      },
+      "client_request_id": "friend_comment:job_f2ec57aa",
+      "remote_task_id": "task_5fdb412ef449",
+      "remote_status": "queued",
+      "remote_created_at": "2026-04-06T06:17:22.419865Z"
+    },
+    {
+      "id": "job_fae5052d",
+      "type": "friend_comment",
+      "status": "poll_remote_task",
+      "run_at": "2026-04-06T06:17:27.762Z",
+      "retry_count": 0,
+      "payload": {
+        "event_id": "evt_b6e0b2ac",
+        "friend_id": "friend_Ithea",
+        "phase": "generate",
+        "source_comment_id": "cmt_e110eddd"
+      },
+      "client_request_id": "friend_comment:job_fae5052d",
+      "remote_task_id": "task_f9f986c049e9",
+      "remote_status": "queued",
+      "remote_created_at": "2026-04-06T06:17:23.045556Z"
+    },
+    {
+      "id": "job_c3e1b954",
+      "type": "friend_comment",
+      "status": "poll_remote_task",
+      "run_at": "2026-04-06T06:17:25.247Z",
+      "retry_count": 0,
+      "payload": {
+        "event_id": "evt_b6e0b2ac",
+        "friend_id": "friend_ice",
+        "phase": "generate",
+        "source_comment_id": "cmt_9e56b007"
+      },
+      "client_request_id": "friend_comment:job_c3e1b954",
+      "remote_task_id": "task_c8ca8299aa4c",
+      "remote_status": "queued",
+      "remote_created_at": "2026-04-06T06:17:22.547164Z"
+    },
+    {
+      "id": "job_2c64b4b3",
+      "type": "friend_comment",
+      "status": "poll_remote_task",
+      "run_at": "2026-04-06T06:17:24.294Z",
+      "retry_count": 0,
+      "payload": {
+        "event_id": "evt_b6e0b2ac",
+        "friend_id": "friend_Ithea",
+        "phase": "generate",
+        "source_comment_id": "cmt_9e56b007"
+      },
+      "client_request_id": "friend_comment:job_2c64b4b3",
+      "remote_task_id": "task_e8657369d5d8",
+      "remote_status": "queued",
+      "remote_created_at": "2026-04-06T06:17:21.750426Z"
+    },
+    {
+      "id": "job_7d8e2df2",
+      "type": "friend_comment",
+      "status": "poll_remote_task",
+      "run_at": "2026-04-06T06:17:27.904Z",
+      "retry_count": 0,
+      "payload": {
+        "event_id": "evt_b6e0b2ac",
+        "friend_id": "friend_ice",
+        "phase": "generate",
+        "source_comment_id": "cmt_d3736250"
+      },
+      "client_request_id": "friend_comment:job_7d8e2df2",
+      "remote_task_id": "task_92aea3efb325",
+      "remote_status": "queued",
+      "remote_created_at": "2026-04-06T06:17:22.329327Z"
+    },
+    {
+      "id": "job_fc9fa2ce",
+      "type": "friend_comment",
+      "status": "poll_remote_task",
+      "run_at": "2026-04-06T06:17:24.906Z",
+      "retry_count": 0,
+      "payload": {
+        "event_id": "evt_b6e0b2ac",
+        "friend_id": "friend_Ithea",
+        "phase": "generate",
+        "source_comment_id": "cmt_d3736250"
+      },
+      "client_request_id": "friend_comment:job_fc9fa2ce",
+      "remote_task_id": "task_23619f33fe18",
+      "remote_status": "queued",
+      "remote_created_at": "2026-04-06T06:17:22.230264Z"
+    },
+    {
+      "id": "job_f5fc2d7c",
+      "type": "friend_comment",
+      "status": "poll_remote_task",
+      "run_at": "2026-04-06T06:17:25.931Z",
+      "retry_count": 0,
+      "payload": {
+        "event_id": "evt_b6e0b2ac",
+        "friend_id": "friend_fire",
+        "phase": "generate",
+        "source_comment_id": "cmt_cb9ce965"
+      },
+      "client_request_id": "friend_comment:job_f5fc2d7c",
+      "remote_task_id": "task_8e09e946b6ce",
+      "remote_status": "queued",
+      "remote_created_at": "2026-04-06T06:17:22.708140Z"
+    },
+    {
+      "id": "job_c8412061",
+      "type": "friend_comment",
+      "status": "poll_remote_task",
+      "run_at": "2026-04-06T06:17:25.752Z",
+      "retry_count": 0,
+      "payload": {
+        "event_id": "evt_b6e0b2ac",
+        "friend_id": "friend_Ithea",
+        "phase": "generate",
+        "source_comment_id": "cmt_cb9ce965"
+      },
+      "client_request_id": "friend_comment:job_c8412061",
+      "remote_task_id": "task_462223581e2e",
+      "remote_status": "queued",
+      "remote_created_at": "2026-04-06T06:17:22.668163Z"
+    },
+    {
+      "id": "job_03e9a1e0",
+      "type": "friend_comment",
+      "status": "poll_remote_task",
+      "run_at": "2026-04-06T06:17:27.273Z",
+      "retry_count": 0,
+      "payload": {
+        "event_id": "evt_b6e0b2ac",
+        "friend_id": "friend_fire",
+        "phase": "generate",
+        "source_comment_id": "cmt_2e82810d"
+      },
+      "client_request_id": "friend_comment:job_03e9a1e0",
+      "remote_task_id": "task_654aa2bd9447",
+      "remote_status": "queued",
+      "remote_created_at": "2026-04-06T06:17:22.963649Z"
+    },
+    {
+      "id": "job_d11ce887",
+      "type": "friend_comment",
+      "status": "poll_remote_task",
+      "run_at": "2026-04-06T06:17:25.059Z",
+      "retry_count": 0,
+      "payload": {
+        "event_id": "evt_b6e0b2ac",
+        "friend_id": "friend_ice",
+        "phase": "generate",
+        "source_comment_id": "cmt_2e82810d"
+      },
+      "client_request_id": "friend_comment:job_d11ce887",
+      "remote_task_id": "task_8a01e461026d",
+      "remote_status": "queued",
+      "remote_created_at": "2026-04-06T06:17:22.508544Z"
+    },
+    {
+      "id": "job_64b7e9a7",
+      "type": "friend_comment",
+      "status": "poll_remote_task",
+      "run_at": "2026-04-06T06:17:27.540Z",
+      "retry_count": 0,
+      "payload": {
+        "event_id": "evt_b6e0b2ac",
+        "friend_id": "friend_ice",
+        "phase": "generate",
+        "source_comment_id": "cmt_e635c3ef"
+      },
+      "client_request_id": "friend_comment:job_64b7e9a7",
+      "remote_task_id": "task_6794eaa4c11f",
+      "remote_status": "queued",
+      "remote_created_at": "2026-04-06T06:17:22.463716Z"
+    },
+    {
+      "id": "job_259f83e9",
+      "type": "friend_comment",
+      "status": "poll_remote_task",
+      "run_at": "2026-04-06T06:17:24.485Z",
+      "retry_count": 0,
+      "payload": {
+        "event_id": "evt_b6e0b2ac",
+        "friend_id": "friend_Ithea",
+        "phase": "generate",
+        "source_comment_id": "cmt_e635c3ef"
+      },
+      "client_request_id": "friend_comment:job_259f83e9",
+      "remote_task_id": "task_c749de0c857a",
+      "remote_status": "queued",
+      "remote_created_at": "2026-04-06T06:17:21.899806Z"
+    },
+    {
+      "id": "job_0d188726",
+      "type": "friend_comment",
+      "status": "poll_remote_task",
+      "run_at": "2026-04-06T06:17:26.769Z",
+      "retry_count": 0,
+      "payload": {
+        "event_id": "evt_b6e0b2ac",
+        "friend_id": "friend_fire",
+        "phase": "generate",
+        "source_comment_id": "cmt_fb0f2220"
+      },
+      "client_request_id": "friend_comment:job_0d188726",
+      "remote_task_id": "task_fe7862ffa4c8",
+      "remote_status": "queued",
+      "remote_created_at": "2026-04-06T06:17:22.616683Z"
+    },
+    {
+      "id": "job_8d253b94",
+      "type": "friend_comment",
+      "status": "poll_remote_task",
+      "run_at": "2026-04-06T06:17:26.475Z",
+      "retry_count": 0,
+      "payload": {
+        "event_id": "evt_b6e0b2ac",
+        "friend_id": "friend_ice",
+        "phase": "generate",
+        "source_comment_id": "cmt_fb0f2220"
+      },
+      "client_request_id": "friend_comment:job_8d253b94",
+      "remote_task_id": "task_e460e3d455db",
+      "remote_status": "queued",
+      "remote_created_at": "2026-04-06T06:17:22.760086Z"
+    },
+    {
+      "id": "job_536a192f",
+      "type": "friend_comment",
+      "status": "create_remote_task",
+      "run_at": "2026-04-06T06:17:31.388Z",
+      "retry_count": 0,
+      "payload": {
+        "event_id": "evt_86b6da76",
+        "friend_id": "friend_ice",
+        "phase": "generate",
+        "source_comment_id": "cmt_853926fc"
+      }
+    },
+    {
+      "id": "job_3d95ffc6",
+      "type": "friend_comment",
+      "status": "create_remote_task",
+      "run_at": "2026-04-06T06:17:31.388Z",
+      "retry_count": 0,
+      "payload": {
+        "event_id": "evt_86b6da76",
+        "friend_id": "friend_Ithea",
+        "phase": "generate",
+        "source_comment_id": "cmt_853926fc"
+      }
+    },
+    {
+      "id": "job_1b316b5c",
+      "type": "friend_comment",
+      "status": "create_remote_task",
+      "run_at": "2026-04-06T06:17:33.442Z",
+      "retry_count": 0,
+      "payload": {
+        "event_id": "evt_b6e0b2ac",
+        "friend_id": "friend_fire",
+        "phase": "generate",
+        "source_comment_id": "cmt_545941e1"
+      }
+    },
+    {
+      "id": "job_fc098f32",
+      "type": "friend_comment",
+      "status": "create_remote_task",
+      "run_at": "2026-04-06T06:17:33.443Z",
+      "retry_count": 0,
+      "payload": {
+        "event_id": "evt_b6e0b2ac",
+        "friend_id": "friend_Ithea",
+        "phase": "generate",
+        "source_comment_id": "cmt_545941e1"
+      }
+    },
+    {
+      "id": "job_78ca3231",
+      "type": "friend_comment",
+      "status": "create_remote_task",
+      "run_at": "2026-04-06T06:17:35.088Z",
+      "retry_count": 0,
+      "payload": {
+        "event_id": "evt_86b6da76",
+        "friend_id": "friend_fire",
+        "phase": "generate",
+        "source_comment_id": "cmt_dcbf46de"
+      }
+    },
+    {
+      "id": "job_f924c53f",
+      "type": "friend_comment",
+      "status": "create_remote_task",
+      "run_at": "2026-04-06T06:17:35.089Z",
+      "retry_count": 0,
+      "payload": {
+        "event_id": "evt_86b6da76",
+        "friend_id": "friend_ice",
+        "phase": "generate",
+        "source_comment_id": "cmt_dcbf46de"
+      }
+    }
+  ]
+}

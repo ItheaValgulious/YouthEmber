@@ -58,3 +58,13 @@ npm run cap:sync
 npm run cap:open:android
 npm run cap:open:ios
 ```
+
+### Build Android APK on Windows
+
+```bash
+build-android-apk.bat
+build-android-apk.bat release
+```
+
+Release builds may output either `app-release.apk` or `app-release-unsigned.apk` depending on signing setup.
+If you see `Unsupported class file major version 69`, switch `JAVA_HOME` to JDK 21 or 17 before building.

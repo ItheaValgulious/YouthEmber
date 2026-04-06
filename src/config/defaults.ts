@@ -8,7 +8,7 @@ const DEFAULT_FRIEND_MODEL_IDS: Record<string, string> = {
   friend_Ithea: 'deepseek-v3',
 };
 
-export const DEFAULT_FRIEND_AI_ACTIVE = 0.1;
+export const DEFAULT_FRIEND_AI_ACTIVE = 0.02;
 
 function sanitizeFriendMemorySegment(value: string): string {
   const clean = value
