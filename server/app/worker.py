@@ -4,6 +4,7 @@ import copy
 import json
 import logging
 import threading
+import traceback
 from datetime import timedelta
 from typing import Any
 
@@ -129,6 +130,11 @@ class TaskWorker:
                 retry_count=retry_count,
                 error_code=exc.error_code,
                 error_message=exc.message,
+                context={
+                    "source": "worker",
+                    "failure_type": "app_error",
+                    "exception_type": type(exc).__name__,
+                },
             )
             return
         except UpstreamFailure as exc:
@@ -159,6 +165,12 @@ class TaskWorker:
                 retry_count=retry_count,
                 error_code=exc.error_code,
                 error_message=exc.message,
+                context={
+                    "source": "worker",
+                    "failure_type": "upstream_failure",
+                    "exception_type": type(exc).__name__,
+                    "retryable": exc.retryable,
+                },
             )
             return
         except Exception as exc:
@@ -188,6 +200,12 @@ class TaskWorker:
                 retry_count=retry_count,
                 error_code=failure.error_code,
                 error_message=failure.message,
+                context={
+                    "source": "worker",
+                    "failure_type": "worker_internal_error",
+                    "exception_type": type(exc).__name__,
+                    "traceback": traceback.format_exc(),
+                },
             )
             return
 

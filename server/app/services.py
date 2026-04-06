@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
+import threading
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -41,6 +43,10 @@ class UserQuotaSummary:
     username: str
     quota_before: int
     quota_after: int
+
+
+logger = logging.getLogger(__name__)
+_failed_task_log_lock = threading.Lock()
 
 
 def provider_from_baseurl(baseurl: str) -> str:
@@ -288,6 +294,46 @@ def _fetch_current_task_by_id(
         (task_id,),
     ).fetchone()
     return row_to_dict(row)
+
+
+def _write_failed_task_log(
+    settings: Settings,
+    *,
+    task_row: dict[str, Any],
+    context: dict[str, Any] | None = None,
+) -> None:
+    task_id = str(task_row.get("id") or "unknown")
+    logged_at = utc_now_iso()
+    safe_timestamp = logged_at.replace(":", "-")
+
+    payload: dict[str, Any] = {
+        "logged_at": logged_at,
+        "task_id": task_id,
+        "error_code": task_row.get("error_code"),
+        "error_message": task_row.get("error_message"),
+        "retry_count": task_row.get("retry_count"),
+        "task": task_row,
+    }
+
+    if context:
+        payload["context"] = context
+
+    request_body_raw = task_row.get("request_body")
+    if isinstance(request_body_raw, str):
+        try:
+            payload["request_body_json"] = json.loads(request_body_raw)
+        except json.JSONDecodeError:
+            payload["request_body_raw"] = request_body_raw
+
+    log_dir = settings.data_dir / "failed_tasks"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / f"{safe_timestamp}-{task_id}.log"
+
+    with _failed_task_log_lock:
+        log_path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
 
 
 def signup(settings: Settings, username: str, password: str) -> dict[str, Any]:
@@ -928,6 +974,7 @@ def mark_task_failed(
     retry_count: int,
     error_code: str,
     error_message: str,
+    context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     now = utc_now_iso()
     with connection_scope(settings) as connection:
@@ -949,7 +996,13 @@ def mark_task_failed(
             raise AppError(404, "task_not_found", "Task does not exist.")
         _copy_current_task_to_stats(connection, current_row, updated_at=now)
         connection.commit()
-        return current_row
+
+    try:
+        _write_failed_task_log(settings, task_row=current_row, context=context)
+    except Exception:
+        logger.exception("Failed to write failed-task log for task %s.", task_id)
+
+    return current_row
 
 
 def build_task_view(raw_row: dict[str, Any] | None, *, include_response: bool) -> dict[str, Any]:

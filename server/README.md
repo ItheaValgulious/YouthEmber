@@ -75,6 +75,7 @@ python -m venv .venv
 - `GET /api/v1/models` 只返回安全字段，不返回 `baseurl`、`apikey`、`dealing_img`、`timeout_seconds`
 - 任务结果在客户端 `ack` 前保存在 `current_requests`
 - `ack` 后正文会从 `current_requests` 删除，仅保留 `request_stats` 元数据
+- 任务失败时会将完整上下文写入 `data/failed_tasks/*.log`
 
 ## 可选环境变量
 
